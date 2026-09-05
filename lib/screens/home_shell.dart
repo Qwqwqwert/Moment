@@ -18,14 +18,8 @@ class _HomeShellState extends State<HomeShell> {
     body: Stack(
       fit: StackFit.expand,
       children: [
-        _PageFade(
-          visible: _index == 0,
-          child: const NotesHomeScreen(),
-        ),
-        _PageFade(
-          visible: _index == 1,
-          child: const TodosScreen(),
-        ),
+        _PageFade(visible: _index == 0, child: const NotesHomeScreen()),
+        _PageFade(visible: _index == 1, child: const TodosScreen()),
       ],
     ),
     bottomNavigationBar: Material(
@@ -33,7 +27,7 @@ class _HomeShellState extends State<HomeShell> {
       child: SafeArea(
         top: false,
         child: SizedBox(
-          height: 56,
+          height: 70,
           child: Row(
             children: [
               _HomeDestination(

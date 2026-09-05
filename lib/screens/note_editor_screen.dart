@@ -27,7 +27,8 @@ class NoteEditorScreen extends StatefulWidget {
   State<NoteEditorScreen> createState() => _NoteEditorScreenState();
 }
 
-class _NoteEditorScreenState extends State<NoteEditorScreen> {
+class _NoteEditorScreenState extends State<NoteEditorScreen>
+    with WidgetsBindingObserver {
   late final AppController _app;
   late final TextEditingController _titleController;
   late final TextEditingController _contentController;
@@ -43,12 +44,14 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
   bool _markdownPreview = false;
   bool _saveHandledForDispose = false;
   bool _disposing = false;
+  bool _keyboardWasVisible = false;
   String _saveLabel = '新笔记';
   Timer? _saveTimer;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _app = AppScope.read(context);
     final source = widget.noteId == null
         ? null
@@ -76,6 +79,7 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
   @override
   void dispose() {
     _disposing = true;
+    WidgetsBinding.instance.removeObserver(this);
     _saveTimer?.cancel();
     if (!widget.readOnly && !_discarded && !_saveHandledForDispose) {
       _save();
@@ -86,6 +90,16 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
       item.controller.dispose();
     }
     super.dispose();
+  }
+
+  @override
+  void didChangeMetrics() {
+    if (!mounted) return;
+    final keyboardVisible = View.of(context).viewInsets.bottom > 0;
+    if (_keyboardWasVisible && !keyboardVisible && _isTextInputFocused) {
+      FocusManager.instance.primaryFocus?.unfocus();
+    }
+    _keyboardWasVisible = keyboardVisible;
   }
 
   void _scheduleSave() {
@@ -209,6 +223,22 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
     await _save();
     _saveHandledForDispose = true;
     if (mounted && !widget.embedded) Navigator.pop(context);
+  }
+
+  bool get _isTextInputFocused {
+    final focusContext = FocusManager.instance.primaryFocus?.context;
+    if (focusContext == null) return false;
+    return focusContext.widget is EditableText ||
+        focusContext.findAncestorWidgetOfExactType<EditableText>() != null;
+  }
+
+  void _handleSystemBack(bool didPop) {
+    if (didPop) return;
+    if (_isTextInputFocused) {
+      FocusManager.instance.primaryFocus?.unfocus();
+      return;
+    }
+    _close();
   }
 
   Future<void> _recoverLostImages() async {
@@ -358,6 +388,7 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
                     ? TextField(
                         key: const Key('markdown-source-editor'),
                         controller: _contentController,
+                        autofocus: widget.noteId == null,
                         minLines: 12,
                         maxLines: null,
                         keyboardType: TextInputType.multiline,
@@ -417,9 +448,7 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
 
     final body = PopScope(
       canPop: widget.embedded,
-      onPopInvokedWithResult: (didPop, result) {
-        if (!didPop) _close();
-      },
+      onPopInvokedWithResult: (didPop, result) => _handleSystemBack(didPop),
       child: Column(
         children: [
           if (widget.embedded)
@@ -509,18 +538,11 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
               duration: const Duration(milliseconds: 180),
               child: _markdownPreview
                   ? const SizedBox.shrink(key: ValueKey('preview-bottom-bar'))
-                  : AnimatedPadding(
+                  : _EditorBottomBar(
                       key: const ValueKey('edit-bottom-bar'),
-                      duration: const Duration(milliseconds: 220),
-                      curve: Curves.easeOutCubic,
-                      padding: EdgeInsets.only(
-                        bottom: MediaQuery.viewInsetsOf(context).bottom,
-                      ),
-                      child: _EditorBottomBar(
-                        onTags: _chooseTags,
-                        onChecklist: _addChecklist,
-                        onImages: _images.length >= 9 ? null : _pickImages,
-                      ),
+                      onTags: _chooseTags,
+                      onChecklist: _addChecklist,
+                      onImages: _images.length >= 9 ? null : _pickImages,
                     ),
             ),
     );

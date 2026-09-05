@@ -22,19 +22,29 @@ class NoteCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colors = theme.colorScheme;
-    final preview = note.content.trim().isNotEmpty
-        ? note.content.trim()
+    final hasTitle = note.title.trim().isNotEmpty;
+    final contentLines = note.content.trim().isNotEmpty
+        ? note.content
+              .trim()
+              .split(RegExp(r'\r?\n'))
+              .map((line) => line.trim())
+              .where((line) => line.isNotEmpty)
+              .toList()
         : note.checklist
-              .map((item) => item.text)
+              .map((item) => item.text.trim())
               .where((text) => text.isNotEmpty)
-              .join(' · ');
-    final title = note.title.trim().isEmpty
-        ? (preview.isEmpty ? '无标题笔记' : preview.split('\n').first)
-        : note.title.trim();
+              .toList();
+    final primaryText = hasTitle
+        ? note.title.trim()
+        : (contentLines.isEmpty ? '无标题笔记' : contentLines.first);
+    final secondaryText = hasTitle
+        ? (contentLines.isEmpty ? null : contentLines.first)
+        : (contentLines.length > 1 ? contentLines[1] : null);
+    final hasSecondaryText = secondaryText != null;
 
     return AnimatedContainer(
       duration: const Duration(milliseconds: 180),
-      margin: const EdgeInsets.only(bottom: 12),
+      margin: const EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(
         color: selected
             ? colors.primaryContainer.withValues(alpha: 0.68)
@@ -62,33 +72,21 @@ class NoteCard extends StatelessWidget {
           onTap: onTap,
           onLongPress: onLongPress,
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(18, 17, 14, 15),
+            padding: EdgeInsets.fromLTRB(
+              16,
+              hasSecondaryText ? 12 : 10,
+              14,
+              hasSecondaryText ? 11 : 9,
+            ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
-                    AnimatedContainer(
-                      duration: const Duration(milliseconds: 180),
-                      width: 34,
-                      height: 34,
-                      decoration: BoxDecoration(
-                        color: selected
-                            ? colors.primary
-                            : colors.primaryContainer,
-                        borderRadius: BorderRadius.circular(11),
-                      ),
-                      child: Icon(
-                        selected ? Icons.check_rounded : Icons.notes_rounded,
-                        size: 19,
-                        color: selected ? colors.onPrimary : colors.primary,
-                      ),
-                    ),
-                    const SizedBox(width: 12),
                     Expanded(
                       child: Text(
-                        title,
+                        primaryText,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: theme.textTheme.titleMedium?.copyWith(
@@ -110,30 +108,30 @@ class NoteCard extends StatelessWidget {
                     ?trailing,
                   ],
                 ),
-                if (preview.isNotEmpty && note.title.trim().isNotEmpty) ...[
-                  const SizedBox(height: 11),
+                if (hasSecondaryText) ...[
+                  const SizedBox(height: 4),
                   Text(
-                    preview,
-                    maxLines: 2,
+                    secondaryText!,
+                    maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: theme.textTheme.bodyMedium?.copyWith(
-                      height: 1.45,
+                      height: 1.3,
                       color: colors.onSurfaceVariant,
                     ),
                   ),
                 ],
-                const SizedBox(height: 14),
+                SizedBox(height: hasSecondaryText ? 10 : 7),
                 Row(
                   children: [
                     Expanded(
                       child: Wrap(
-                        spacing: 6,
-                        runSpacing: 6,
+                        spacing: 5,
+                        runSpacing: 4,
                         children: note.tags.take(3).map((tag) {
                           return Container(
                             padding: const EdgeInsets.symmetric(
-                              horizontal: 9,
-                              vertical: 4,
+                              horizontal: 8,
+                              vertical: 3,
                             ),
                             decoration: BoxDecoration(
                               color: colors.primaryContainer.withValues(
