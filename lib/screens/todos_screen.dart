@@ -1142,6 +1142,11 @@ class _TodoCardState extends State<_TodoCard>
                             label: _todoDateTimeLabel(widget.todo.dueAt),
                             alert: overdue,
                           ),
+                          if (widget.todo.reminderEnabled)
+                            const _TodoMeta(
+                              icon: Icons.notifications_active_outlined,
+                              label: '提醒',
+                            ),
                           if (widget.todo.repeat != TodoRepeat.none)
                             _TodoMeta(
                               icon: Icons.repeat_rounded,
@@ -1249,9 +1254,11 @@ class _TodoEditorScreenState extends State<TodoEditorScreen> {
   late final TextEditingController _description;
   late DateTime _dueAt;
   late TodoPriority _priority;
+  late bool _reminderEnabled;
   late TodoRepeat _repeat;
   Todo? _source;
   bool _repeatScheduleChanged = false;
+  bool _testingReminder = false;
 
   String? get _repeatHint => switch (_repeat) {
     TodoRepeat.weekly => '将于每${_weekdayLabel(_dueAt.weekday)}重复',
@@ -1272,6 +1279,7 @@ class _TodoEditorScreenState extends State<TodoEditorScreen> {
         _source?.dueAt ??
         DateTime(initial.year, initial.month, initial.day, 10);
     _priority = _source?.priority ?? TodoPriority.p1;
+    _reminderEnabled = _source?.reminderEnabled ?? false;
     _repeat = _source?.repeat ?? TodoRepeat.none;
     _title = TextEditingController(text: _source?.title ?? '');
     _description = TextEditingController(text: _source?.description ?? '');
@@ -1326,6 +1334,46 @@ class _TodoEditorScreenState extends State<TodoEditorScreen> {
     }
   }
 
+  Future<void> _setReminder(bool enabled) async {
+    if (!enabled) {
+      setState(() => _reminderEnabled = false);
+      return;
+    }
+    final granted = await AppScope.read(context)
+        .requestTodoReminderPermission();
+    if (!mounted) return;
+    if (granted) {
+      setState(() => _reminderEnabled = true);
+    } else {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('需要通知、精确闹钟和全屏提醒权限才能开启提醒')));
+    }
+  }
+
+  Future<void> _openReminderSettings() async {
+    final opened = await AppScope.read(context).openTodoReminderSettings();
+    if (!mounted || opened) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('无法打开通知设置，请在系统设置中找到 Moment')));
+  }
+
+  Future<void> _testReminder() async {
+    if (_testingReminder) return;
+    setState(() => _testingReminder = true);
+    final app = AppScope.read(context);
+    final granted = await app.requestTodoNotificationPermission();
+    final shown = granted && await app.showTodoTestReminder();
+    if (!mounted) return;
+    setState(() => _testingReminder = false);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(shown ? '测试提醒已发送，请检查通知栏、弹窗、声音和振动' : '请先允许 Moment 发送通知'),
+      ),
+    );
+  }
+
   Future<void> _save() async {
     final title = _title.text.trim();
     if (title.isEmpty) {
@@ -1333,14 +1381,37 @@ class _TodoEditorScreenState extends State<TodoEditorScreen> {
           .showSnackBar(const SnackBar(content: Text('请输入待办标题')));
       return;
     }
+    final dueAt = DateTime(
+      _dueAt.year,
+      _dueAt.month,
+      _dueAt.day,
+      _dueAt.hour,
+      _dueAt.minute,
+    );
     final now = DateTime.now();
+    if (_reminderEnabled && !dueAt.isAfter(now)) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('提醒时间必须晚于当前时间')));
+      return;
+    }
+    if (_reminderEnabled) {
+      final granted = await AppScope.read(context)
+          .requestTodoReminderPermission();
+      if (!mounted) return;
+      if (!granted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('请授予全屏提醒权限后再保存')));
+        return;
+      }
+    }
     await AppScope.read(context).saveTodo(
       Todo(
         id: _source?.id ?? newId(),
         title: title,
         description: _description.text.trim(),
-        dueAt: _dueAt,
+        dueAt: dueAt,
         priority: _priority,
+        reminderEnabled: _reminderEnabled,
         repeat: _repeat,
         repeatDayOfMonth:
             _repeat == TodoRepeat.monthly || _repeat == TodoRepeat.yearly
@@ -1348,14 +1419,14 @@ class _TodoEditorScreenState extends State<TodoEditorScreen> {
                       !_repeatScheduleChanged &&
                       _source!.repeat == _repeat
                   ? _source!.repeatDayOfMonth ?? _source!.dueAt.day
-                  : _dueAt.day)
+                  : dueAt.day)
             : null,
         repeatMonth: _repeat == TodoRepeat.yearly
             ? (_source != null &&
                       !_repeatScheduleChanged &&
                       _source!.repeat == _repeat
                   ? _source!.repeatMonth ?? _source!.dueAt.month
-                  : _dueAt.month)
+                  : dueAt.month)
             : null,
         isCompleted: _source?.isCompleted ?? false,
         createdAt: _source?.createdAt ?? now,
@@ -1456,6 +1527,58 @@ class _TodoEditorScreenState extends State<TodoEditorScreen> {
           ],
         ),
         const SizedBox(height: 22),
+        SwitchListTile(
+          contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+          secondary: const Icon(Icons.notifications_active_outlined),
+          title: const Text('提醒'),
+          subtitle: const Text('在截止时间弹出系统通知'),
+          value: _reminderEnabled,
+          onChanged: _setReminder,
+        ),
+        Container(
+          margin: const EdgeInsets.only(top: 2, bottom: 12),
+          padding: const EdgeInsets.fromLTRB(14, 12, 14, 10),
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.surfaceContainerLow,
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '部分安卓手机需要在应用的“通知权限”中自行开启横幅、锁屏、铃声和振动，否则提醒可能只显示在通知栏。',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Wrap(
+                spacing: 8,
+                runSpacing: 4,
+                children: [
+                  TextButton.icon(
+                    onPressed: _openReminderSettings,
+                    icon: const Icon(Icons.open_in_new_rounded, size: 18),
+                    label: const Text('打开通知权限'),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: _testingReminder ? null : _testReminder,
+                    icon: _testingReminder
+                        ? const SizedBox.square(
+                            dimension: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(
+                            Icons.notifications_active_outlined,
+                            size: 18,
+                          ),
+                    label: const Text('测试提醒'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
         Text('优先级', style: Theme.of(context).textTheme.titleSmall),
         const SizedBox(height: 10),
         Wrap(

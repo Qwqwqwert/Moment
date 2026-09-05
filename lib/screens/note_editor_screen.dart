@@ -1,10 +1,14 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../models/note.dart';
@@ -214,6 +218,102 @@ class _NoteEditorScreenState extends State<NoteEditorScreen>
     updatedAt: DateTime.now(),
     isFavorite: _favorite,
   );
+
+  String _markdownDocument() {
+    final sections = <String>[];
+    final title = _titleController.text.replaceAll(RegExp(r'\s+'), ' ').trim();
+    final content = _contentController.text.trim();
+    if (title.isNotEmpty) sections.add('# $title');
+    if (content.isNotEmpty) sections.add(content);
+
+    final checklist = _checklist
+        .where((item) => item.controller.text.trim().isNotEmpty)
+        .map((item) {
+          final text = item.controller.text
+              .replaceAll(RegExp(r'[\r\n]+'), ' ')
+              .trim();
+          return '- [${item.checked ? 'x' : ' '}] $text';
+        })
+        .join('\n');
+    if (checklist.isNotEmpty) sections.add('## 待办\n\n$checklist');
+    if (_tags.isNotEmpty) {
+      sections.add('标签：${_tags.map((tag) => '#$tag').join(' ')}');
+    }
+    return sections.join('\n\n').trim();
+  }
+
+  String _markdownFileName() {
+    final title = _titleController.text
+        .replaceAll(RegExp(r'[\\/:*?"<>|\r\n]+'), ' ')
+        .trim();
+    if (title.isNotEmpty) {
+      final safeTitle = title.length > 80 ? title.substring(0, 80).trim() : title;
+      return '$safeTitle.md';
+    }
+    final now = DateTime.now();
+    String twoDigits(int value) => value.toString().padLeft(2, '0');
+    return 'Moment-${now.year}${twoDigits(now.month)}${twoDigits(now.day)}-'
+        '${twoDigits(now.hour)}${twoDigits(now.minute)}.md';
+  }
+
+  Future<void> _shareNote() async {
+    final markdown = _markdownDocument();
+    if (markdown.isEmpty) {
+      _showActionMessage('没有可分享的文字内容');
+      return;
+    }
+    try {
+      await SharePlus.instance.share(
+        ShareParams(
+          text: markdown,
+          subject: _titleController.text.trim().isEmpty
+              ? 'Moment 笔记'
+              : _titleController.text.trim(),
+        ),
+      );
+    } catch (_) {
+      _showActionMessage('无法打开系统分享面板');
+    }
+  }
+
+  Future<void> _exportMarkdown() async {
+    final markdown = _markdownDocument();
+    if (markdown.isEmpty) {
+      _showActionMessage('没有可导出的文字内容');
+      return;
+    }
+    try {
+      final uri = await FilePicker.saveFile(
+        dialogTitle: '导出 Markdown',
+        fileName: _markdownFileName(),
+        bytes: Uint8List.fromList(utf8.encode(markdown)),
+        type: FileType.custom,
+        allowedExtensions: const ['md'],
+        mimeType: 'text/markdown',
+      );
+      if (uri != null) _showActionMessage('Markdown 文件已导出');
+    } catch (_) {
+      _showActionMessage('导出失败，请稍后重试');
+    }
+  }
+
+  void _showActionMessage(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
+  }
+
+  void _handleShareExportAction(_NoteShareExportAction action) {
+    switch (action) {
+      case _NoteShareExportAction.share:
+        unawaited(_shareNote());
+        break;
+      case _NoteShareExportAction.exportMarkdown:
+        unawaited(_exportMarkdown());
+        break;
+    }
+  }
 
   Future<void> _save() async {
     if (_saving || widget.readOnly || (_persisted && !_dirty)) return;
@@ -511,6 +611,7 @@ class _NoteEditorScreenState extends State<NoteEditorScreen>
               markdownPreview: _markdownPreview,
               onMarkdownPreview: () => _setMarkdownPreview(!_markdownPreview),
               onFavorite: _toggleFavorite,
+              onShareExport: _handleShareExportAction,
               onDelete: _delete,
             ),
           Expanded(child: editor),
@@ -574,6 +675,7 @@ class _NoteEditorScreenState extends State<NoteEditorScreen>
                 _favorite ? Icons.star_rounded : Icons.star_outline_rounded,
               ),
             ),
+          _ShareExportMenu(onSelected: _handleShareExportAction),
           if (!widget.readOnly && _persisted)
             IconButton(
               tooltip: '删除',
@@ -888,6 +990,44 @@ class _ChecklistEditor {
   final TextEditingController controller;
 }
 
+enum _NoteShareExportAction { share, exportMarkdown }
+
+class _ShareExportMenu extends StatelessWidget {
+  const _ShareExportMenu({required this.onSelected});
+
+  final ValueChanged<_NoteShareExportAction> onSelected;
+
+  @override
+  Widget build(BuildContext context) =>
+      PopupMenuButton<_NoteShareExportAction>(
+        tooltip: '分享与导出',
+        icon: const Icon(Icons.ios_share_rounded),
+        onSelected: onSelected,
+        itemBuilder: (context) => const [
+          PopupMenuItem(
+            value: _NoteShareExportAction.share,
+            child: Row(
+              children: [
+                Icon(Icons.share_outlined),
+                SizedBox(width: 12),
+                Text('分享'),
+              ],
+            ),
+          ),
+          PopupMenuItem(
+            value: _NoteShareExportAction.exportMarkdown,
+            child: Row(
+              children: [
+                Icon(Icons.download_outlined),
+                SizedBox(width: 12),
+                Text('导出为 .md'),
+              ],
+            ),
+          ),
+        ],
+      );
+}
+
 class _EditorToolbar extends StatelessWidget {
   const _EditorToolbar({
     required this.readOnly,
@@ -896,6 +1036,7 @@ class _EditorToolbar extends StatelessWidget {
     required this.markdownPreview,
     required this.onMarkdownPreview,
     required this.onFavorite,
+    required this.onShareExport,
     required this.onDelete,
   });
   final bool readOnly;
@@ -904,6 +1045,7 @@ class _EditorToolbar extends StatelessWidget {
   final bool markdownPreview;
   final VoidCallback onMarkdownPreview;
   final VoidCallback onFavorite;
+  final ValueChanged<_NoteShareExportAction> onShareExport;
   final VoidCallback onDelete;
 
   @override
@@ -941,6 +1083,7 @@ class _EditorToolbar extends StatelessWidget {
               ),
             ),
           ),
+        _ShareExportMenu(onSelected: onShareExport),
         if (!readOnly)
           IconButton(
             tooltip: favorite ? '取消收藏' : '收藏',

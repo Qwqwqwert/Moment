@@ -13,6 +13,7 @@ class Todo {
     required this.updatedAt,
     this.description = '',
     this.priority = TodoPriority.p1,
+    this.reminderEnabled = false,
     this.repeat = TodoRepeat.none,
     this.repeatDayOfMonth,
     this.repeatMonth,
@@ -25,6 +26,7 @@ class Todo {
   final String description;
   final DateTime dueAt;
   final TodoPriority priority;
+  final bool reminderEnabled;
   final TodoRepeat repeat;
   final int? repeatDayOfMonth;
   final int? repeatMonth;
@@ -40,6 +42,7 @@ class Todo {
     String? description,
     DateTime? dueAt,
     TodoPriority? priority,
+    bool? reminderEnabled,
     TodoRepeat? repeat,
     int? repeatDayOfMonth,
     int? repeatMonth,
@@ -53,6 +56,7 @@ class Todo {
     description: description ?? this.description,
     dueAt: dueAt ?? this.dueAt,
     priority: priority ?? this.priority,
+    reminderEnabled: reminderEnabled ?? this.reminderEnabled,
     repeat: repeat ?? this.repeat,
     repeatDayOfMonth: repeatDayOfMonth ?? this.repeatDayOfMonth,
     repeatMonth: repeatMonth ?? this.repeatMonth,
@@ -80,6 +84,7 @@ class Todo {
       description: description,
       dueAt: next,
       priority: priority,
+      reminderEnabled: reminderEnabled,
       repeat: repeat,
       repeatDayOfMonth:
           repeat == TodoRepeat.monthly || repeat == TodoRepeat.yearly

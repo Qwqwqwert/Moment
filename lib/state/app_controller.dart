@@ -7,12 +7,18 @@ import '../data/note_repository.dart';
 import '../data/todo_repository.dart';
 import '../models/note.dart';
 import '../models/todo.dart';
+import '../services/todo_reminder_service.dart';
 
 class AppController extends ChangeNotifier {
-  AppController({required this.repository, required this.attachmentStore});
+  AppController({
+    required this.repository,
+    required this.attachmentStore,
+    this.todoReminderService,
+  });
 
   final NoteRepository repository;
   final AttachmentStore attachmentStore;
+  final TodoReminderService? todoReminderService;
   StreamSubscription<void>? _subscription;
 
   bool initialized = false;
@@ -46,6 +52,7 @@ class AppController extends ChangeNotifier {
         : null;
     todos = await todoRepository?.getTodos() ?? const [];
     trashedTodos = await todoRepository?.getTodos(deleted: true) ?? const [];
+    await todoReminderService?.syncReminders(todos);
     tags = await repository.getTags();
     loading = false;
     notifyListeners();
@@ -70,22 +77,50 @@ class AppController extends ChangeNotifier {
   TodoRepository? get _todos =>
       repository is TodoRepository ? repository as TodoRepository : null;
 
-  Future<void> saveTodo(Todo todo) async => _todos?.saveTodo(todo);
+  Future<bool> requestTodoReminderPermission() async =>
+      await todoReminderService?.requestPermission() ?? false;
+
+  Future<bool> requestTodoNotificationPermission() async =>
+      await todoReminderService?.requestNotificationPermission() ?? false;
+
+  Future<bool> openTodoReminderSettings() async =>
+      await todoReminderService?.openNotificationSettings() ?? false;
+
+  Future<bool> showTodoTestReminder() async =>
+      await todoReminderService?.showTestReminder() ?? false;
+
+  Future<void> saveTodo(Todo todo) async {
+    await _todos?.saveTodo(todo);
+    if (!todo.reminderEnabled) await todoReminderService?.cancel(todo.id);
+  }
+
   Future<void> completeTodo(
     String id,
     bool completed, {
     DateTime? nextDueAt,
-  }) async => _todos?.setTodoCompleted(
-    id,
-    completed,
-    nextDueAt: nextDueAt,
-  );
-  Future<void> trashTodos(Iterable<String> ids) async =>
-      _todos?.moveTodosToTrash(ids);
+  }) async {
+    await _todos?.setTodoCompleted(id, completed, nextDueAt: nextDueAt);
+    if (completed) await todoReminderService?.cancel(id);
+  }
+
+  Future<void> trashTodos(Iterable<String> ids) async {
+    final values = ids.toList();
+    await _todos?.moveTodosToTrash(values);
+    for (final id in values) {
+      await todoReminderService?.cancel(id);
+    }
+  }
+
   Future<void> restoreTodos(Iterable<String> ids) async =>
       _todos?.restoreTodos(ids);
-  Future<void> deleteTodosForever(Iterable<String> ids) async =>
-      _todos?.permanentlyDeleteTodos(ids);
+
+  Future<void> deleteTodosForever(Iterable<String> ids) async {
+    final values = ids.toList();
+    await _todos?.permanentlyDeleteTodos(values);
+    for (final id in values) {
+      await todoReminderService?.cancel(id);
+    }
+  }
 
   Future<void> save(Note note) => repository.saveNote(note);
   Future<void> trash(Iterable<String> ids) => repository.moveToTrash(ids);

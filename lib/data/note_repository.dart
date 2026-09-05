@@ -37,7 +37,7 @@ class SqliteNoteRepository implements NoteRepository, TodoRepository {
     final root = await getDatabasesPath();
     _database = await openDatabase(
       p.join(root, 'moment.sqlite'),
-      version: 4,
+      version: 5,
       onConfigure: (db) => db.execute('PRAGMA foreign_keys = ON'),
       onCreate: (db, version) async {
         await db.execute('''
@@ -99,6 +99,11 @@ class SqliteNoteRepository implements NoteRepository, TodoRepository {
               "ALTER TABLE todos ADD COLUMN priority TEXT NOT NULL DEFAULT 'p1'",
             );
           }
+          if (oldVersion < 5) {
+            await db.execute(
+              'ALTER TABLE todos ADD COLUMN reminder_enabled INTEGER NOT NULL DEFAULT 0',
+            );
+          }
         }
       },
     );
@@ -112,6 +117,7 @@ class SqliteNoteRepository implements NoteRepository, TodoRepository {
         description TEXT NOT NULL,
         due_at INTEGER NOT NULL,
         priority TEXT NOT NULL DEFAULT 'p1',
+        reminder_enabled INTEGER NOT NULL DEFAULT 0,
         repeat_type TEXT NOT NULL DEFAULT 'none',
         repeat_day INTEGER,
         repeat_month INTEGER,
@@ -135,6 +141,7 @@ class SqliteNoteRepository implements NoteRepository, TodoRepository {
       (value) => value.name == row['priority'],
       orElse: () => TodoPriority.p1,
     ),
+    reminderEnabled: row['reminder_enabled'] == 1,
     repeat: TodoRepeat.values.firstWhere(
       (value) => value.name == row['repeat_type'],
       orElse: () => TodoRepeat.none,
@@ -382,6 +389,7 @@ class SqliteNoteRepository implements NoteRepository, TodoRepository {
     'description': todo.description,
     'due_at': todo.dueAt.millisecondsSinceEpoch,
     'priority': todo.priority.name,
+    'reminder_enabled': todo.reminderEnabled ? 1 : 0,
     'repeat_type': todo.repeat.name,
     'repeat_day': todo.repeatDayOfMonth,
     'repeat_month': todo.repeatMonth,

@@ -3,19 +3,33 @@ import 'package:flutter/material.dart';
 import 'data/attachment_store.dart';
 import 'data/note_repository.dart';
 import 'screens/home_shell.dart';
+import 'services/todo_reminder_service.dart';
 import 'state/app_controller.dart';
 import 'theme/app_theme.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  runApp(MomentApp(repository: SqliteNoteRepository()));
+  final todoReminderService = TodoReminderService();
+  await todoReminderService.initialize();
+  runApp(
+    MomentApp(
+      repository: SqliteNoteRepository(),
+      todoReminderService: todoReminderService,
+    ),
+  );
 }
 
 class MomentApp extends StatefulWidget {
-  const MomentApp({super.key, required this.repository, this.attachmentStore});
+  const MomentApp({
+    super.key,
+    required this.repository,
+    this.attachmentStore,
+    this.todoReminderService,
+  });
 
   final NoteRepository repository;
   final AttachmentStore? attachmentStore;
+  final TodoReminderService? todoReminderService;
 
   @override
   State<MomentApp> createState() => _MomentAppState();
@@ -30,6 +44,7 @@ class _MomentAppState extends State<MomentApp> {
     controller = AppController(
       repository: widget.repository,
       attachmentStore: widget.attachmentStore ?? AttachmentStore(),
+      todoReminderService: widget.todoReminderService,
     )..initialize();
   }
 
