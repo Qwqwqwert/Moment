@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
@@ -42,6 +43,7 @@ class _NoteEditorScreenState extends State<NoteEditorScreen>
   bool _favorite = false;
   bool _persisted = false;
   bool _saving = false;
+  bool _dirty = false;
   bool _discarded = false;
   bool _markdownPreview = false;
   bool _saveHandledForDispose = false;
@@ -72,8 +74,6 @@ class _NoteEditorScreenState extends State<NoteEditorScreen>
       _checklist.add(_ChecklistEditor(item));
     }
     if (!widget.readOnly) {
-      _titleController.addListener(_scheduleSave);
-      _contentController.addListener(_scheduleSave);
       WidgetsBinding.instance.addPostFrameCallback((_) => _recoverLostImages());
     }
   }
@@ -106,6 +106,7 @@ class _NoteEditorScreenState extends State<NoteEditorScreen>
 
   void _scheduleSave() {
     if (widget.readOnly) return;
+    _dirty = true;
     _discarded = false;
     if (mounted && !_disposing) setState(() => _saveLabel = '编辑中');
     _saveTimer?.cancel();
@@ -215,13 +216,14 @@ class _NoteEditorScreenState extends State<NoteEditorScreen>
   );
 
   Future<void> _save() async {
-    if (_saving || widget.readOnly) return;
+    if (_saving || widget.readOnly || (_persisted && !_dirty)) return;
     final note = _buildNote();
     if (!_persisted &&
         note.isBlank &&
         note.checklist.isEmpty &&
         note.imagePaths.isEmpty) {
       if (mounted && !_disposing) setState(() => _saveLabel = '新笔记');
+      _dirty = false;
       return;
     }
     _saving = true;
@@ -237,6 +239,7 @@ class _NoteEditorScreenState extends State<NoteEditorScreen>
         await _app.save(note);
         _persisted = true;
       }
+      _dirty = false;
       widget.onSaved?.call();
     } finally {
       _saving = false;
@@ -271,6 +274,7 @@ class _NoteEditorScreenState extends State<NoteEditorScreen>
     final recovered = await _app.attachmentStore.recoverLost(_id);
     if (recovered.isNotEmpty && mounted) {
       setState(() => _images = [..._images, ...recovered].take(9).toList());
+      _dirty = true;
       await _save();
     }
   }
@@ -283,6 +287,7 @@ class _NoteEditorScreenState extends State<NoteEditorScreen>
       );
       if (!mounted || added.isEmpty) return;
       setState(() => _images = [..._images, ...added]);
+      _dirty = true;
       await _save();
     } catch (error) {
       if (mounted) {
@@ -303,6 +308,7 @@ class _NoteEditorScreenState extends State<NoteEditorScreen>
       ),
     );
     if (!mounted || selected == null) return;
+    if (listEquals(_tags, selected)) return;
     setState(() => _tags = selected);
     _scheduleSave();
   }
@@ -363,6 +369,7 @@ class _NoteEditorScreenState extends State<NoteEditorScreen>
               TextField(
                 controller: _titleController,
                 readOnly: widget.readOnly,
+                onChanged: widget.readOnly ? null : (_) => _scheduleSave(),
                 maxLength: 20,
                 maxLines: null,
                 decoration: const InputDecoration(
@@ -415,6 +422,7 @@ class _NoteEditorScreenState extends State<NoteEditorScreen>
                         key: const Key('markdown-source-editor'),
                         controller: _contentController,
                         autofocus: widget.noteId == null,
+                        onChanged: (_) => _scheduleSave(),
                         minLines: 12,
                         maxLines: null,
                         keyboardType: TextInputType.multiline,
@@ -689,6 +697,7 @@ class _NoteEditorScreenState extends State<NoteEditorScreen>
             onPressed: () async {
               final removed = _images[index];
               setState(() => _images.removeAt(index));
+              _dirty = true;
               await _save();
               await _app.attachmentStore.deleteFiles([removed]);
             },
