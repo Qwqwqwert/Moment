@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../models/note.dart';
+import '../services/ai_service.dart';
 import '../state/app_controller.dart';
 import '../utils/tag_name.dart';
 import '../widgets/note_card.dart';
@@ -18,6 +19,9 @@ class _SearchNotesScreenState extends State<SearchNotesScreen> {
   final _focusNode = FocusNode();
   DateTime? _start;
   DateTime? _end;
+  bool _naturalLanguage = false;
+  bool _aiSearching = false;
+  List<Note> _aiResults = const [];
 
   @override
   void dispose() {
@@ -52,7 +56,10 @@ class _SearchNotesScreenState extends State<SearchNotesScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final results = _results(AppScope.of(context).notes);
+    final app = AppScope.of(context);
+    final results = _naturalLanguage
+        ? _filterByDate(_aiResults)
+        : _results(app.notes);
     return Scaffold(
       appBar: AppBar(title: const Text('搜索笔记')),
       body: Column(
@@ -62,10 +69,28 @@ class _SearchNotesScreenState extends State<SearchNotesScreen> {
             child: SearchBar(
               controller: _query,
               focusNode: _focusNode,
-              hintText: '请输入关键词',
+              hintText: _naturalLanguage ? '描述你想查找的笔记' : '请输入关键词',
               leading: const Icon(Icons.search),
-              onChanged: (_) => setState(() {}),
+              onChanged: (_) => setState(() {
+                if (_naturalLanguage) _aiResults = const [];
+              }),
+              onSubmitted: (_) {
+                if (_naturalLanguage) _runNaturalSearch(app);
+              },
               trailing: [
+                if (_naturalLanguage)
+                  IconButton(
+                    tooltip: '开始自然语言搜索',
+                    onPressed: _aiSearching
+                        ? null
+                        : () => _runNaturalSearch(app),
+                    icon: _aiSearching
+                        ? const SizedBox.square(
+                            dimension: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.auto_awesome_rounded),
+                  ),
                 IconButton(
                   onPressed: _showDateFilter,
                   icon: const Icon(Icons.tune),
@@ -73,6 +98,25 @@ class _SearchNotesScreenState extends State<SearchNotesScreen> {
               ],
             ),
           ),
+          if (app.aiConfig.isComplete)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: SegmentedButton<bool>(
+                segments: const [
+                  ButtonSegment(value: false, label: Text('关键词')),
+                  ButtonSegment(
+                    value: true,
+                    icon: Icon(Icons.auto_awesome_rounded),
+                    label: Text('自然语言'),
+                  ),
+                ],
+                selected: {_naturalLanguage},
+                onSelectionChanged: (value) => setState(() {
+                  _naturalLanguage = value.single;
+                  _aiResults = const [];
+                }),
+              ),
+            ),
           if (_start != null || _end != null)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -93,8 +137,12 @@ class _SearchNotesScreenState extends State<SearchNotesScreen> {
               ),
             ),
           Expanded(
-            child: _query.text.trim().isEmpty
-                ? const Center(child: Text('输入关键词搜索笔记'))
+            child: _aiSearching
+                ? const Center(child: CircularProgressIndicator())
+                : _query.text.trim().isEmpty
+                ? Center(
+                    child: Text(_naturalLanguage ? '描述你想查找的笔记' : '输入关键词搜索笔记'),
+                  )
                 : results.isEmpty
                 ? const Center(child: Text('未找到匹配的笔记'))
                 : ListView.builder(
@@ -116,6 +164,60 @@ class _SearchNotesScreenState extends State<SearchNotesScreen> {
       ),
     );
   }
+
+  Future<void> _runNaturalSearch(AppController app) async {
+    final query = _query.text.trim();
+    if (query.isEmpty || _aiSearching) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('使用自然语言搜索？'),
+        content: const Text('该功能会把搜索内容、所有笔记正文及必要元数据发送给你配置的 AI，可能消耗大量模型额度。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('继续搜索'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => _aiSearching = true);
+    try {
+      final ids = await AiService(app.aiConfig)
+          .searchNotes(query: query, notes: app.notes);
+      final byId = {for (final note in app.notes) note.id: note};
+      if (mounted) {
+        setState(
+          () => _aiResults = [
+            for (final id in ids)
+              if (byId[id] != null) byId[id]!,
+          ],
+        );
+      }
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('AI 搜索失败：$error')));
+      }
+    } finally {
+      if (mounted) setState(() => _aiSearching = false);
+    }
+  }
+
+  List<Note> _filterByDate(List<Note> notes) => notes.where((note) {
+    final date = DateTime(
+      note.updatedAt.year,
+      note.updatedAt.month,
+      note.updatedAt.day,
+    );
+    return (_start == null || !date.isBefore(_start!)) &&
+        (_end == null || !date.isAfter(_end!));
+  }).toList();
 
   Future<void> _showDateFilter() async {
     final range = await showDateRangePicker(
@@ -145,9 +247,7 @@ class TagsScreen extends StatefulWidget {
 }
 
 class _TagsScreenState extends State<TagsScreen> {
-  final _tagLengthLimiter = LengthLimitingTextInputFormatter(
-    maxTagNameLength,
-  );
+  final _tagLengthLimiter = LengthLimitingTextInputFormatter(maxTagNameLength);
   final _tag = TextEditingController();
   @override
   void dispose() {
@@ -287,9 +387,8 @@ class _TagsScreenState extends State<TagsScreen> {
     final app = AppScope.of(context);
     final validationMessage = validateNewTagName(value, app.tags);
     if (validationMessage != null) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(validationMessage)));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(validationMessage)));
       return;
     }
     await app.addTag(value);
@@ -634,22 +733,246 @@ class _TrashScreenState extends State<TrashScreen> {
   }
 }
 
-class SettingsScreen extends StatelessWidget {
+class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
+
   @override
-  Widget build(BuildContext context) => Scaffold(
-      appBar: AppBar(title: const Text('设置')),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          const Card(
-            child: ListTile(
-              leading: Icon(Icons.info_outline),
-              title: Text('关于 Moment'),
-              subtitle: Text('Flutter 笔记版 · 支持 Markdown 预览'),
-            ),
+  State<SettingsScreen> createState() => _SettingsScreenState();
+}
+
+class _SettingsScreenState extends State<SettingsScreen> {
+  final _baseUrl = TextEditingController();
+  final _model = TextEditingController();
+  final _apiKey = TextEditingController();
+  bool _loaded = false;
+  bool _saving = false;
+  bool _testing = false;
+  bool _showKey = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_loaded) return;
+    final config = AppScope.of(context).aiConfig;
+    _baseUrl.text = config.baseUrl;
+    _model.text = config.model;
+    _apiKey.text = config.apiKey;
+    _loaded = true;
+  }
+
+  @override
+  void dispose() {
+    _baseUrl.dispose();
+    _model.dispose();
+    _apiKey.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    setState(() => _saving = true);
+    try {
+      await AppScope.read(context).saveAiConfig(
+        AiConfig(
+          baseUrl: _baseUrl.text,
+          model: _model.text,
+          apiKey: _apiKey.text,
+        ),
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('AI 配置已保存')));
+      }
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('保存失败：$error')));
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  AiConfig get _currentConfig => AiConfig(
+    baseUrl: _baseUrl.text,
+    model: _model.text,
+    apiKey: _apiKey.text,
+  );
+
+  Future<void> _testSingleTurn() async {
+    final config = _currentConfig;
+    if (!config.isComplete) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('请先完整填写 Base URL、模型名称和 API Key')),
+      );
+      return;
+    }
+
+    var draftMessage = '请只回复“调用成功”四个字。';
+    final message = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('LLM 单轮对话测试'),
+        content: TextFormField(
+          initialValue: draftMessage,
+          autofocus: true,
+          minLines: 2,
+          maxLines: 5,
+          onChanged: (value) => draftMessage = value,
+          decoration: const InputDecoration(
+            labelText: '发送给模型的消息',
+            alignLabelWithHint: true,
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, draftMessage.trim()),
+            child: const Text('发送'),
           ),
         ],
       ),
     );
+    if (!mounted || message == null || message.isEmpty) return;
+
+    FocusManager.instance.primaryFocus?.unfocus();
+    setState(() => _testing = true);
+    try {
+      final response = await AiService(config).singleTurn(message);
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (context) => AlertDialog(
+          icon: const Icon(Icons.check_circle_outline_rounded),
+          title: const Text('调用成功'),
+          content: ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 320),
+            child: SingleChildScrollView(child: SelectableText(response)),
+          ),
+          actions: [
+            FilledButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('完成'),
+            ),
+          ],
+        ),
+      );
+    } catch (error) {
+      if (mounted) {
+        await showDialog<void>(
+          context: context,
+          builder: (context) => AlertDialog(
+            icon: Icon(
+              Icons.error_outline_rounded,
+              color: Theme.of(context).colorScheme.error,
+            ),
+            title: const Text('调用失败'),
+            content: SingleChildScrollView(
+              child: SelectableText(error.toString()),
+            ),
+            actions: [
+              FilledButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('关闭'),
+              ),
+            ],
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _testing = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(title: const Text('设置')),
+    body: ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        const Card(
+          child: ListTile(
+            leading: Icon(Icons.info_outline),
+            title: Text('关于 Moment'),
+            subtitle: Text('Flutter 笔记版 · 支持 Markdown 预览'),
+          ),
+        ),
+        const SizedBox(height: 12),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('AI 配置', style: Theme.of(context).textTheme.titleMedium),
+                const SizedBox(height: 8),
+                const Text(
+                  '支持 OpenAI 兼容的 Chat Completions 接口。API Key 将加密保存在本机；三项全部填写后，AI 标签和自然语言搜索才会显示。',
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: _baseUrl,
+                  keyboardType: TextInputType.url,
+                  decoration: const InputDecoration(
+                    labelText: 'Base URL',
+                    hintText: 'https://api.example.com/v1',
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _model,
+                  decoration: const InputDecoration(labelText: '模型名称'),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _apiKey,
+                  obscureText: !_showKey,
+                  decoration: InputDecoration(
+                    labelText: 'API Key',
+                    suffixIcon: IconButton(
+                      onPressed: () => setState(() => _showKey = !_showKey),
+                      icon: Icon(
+                        _showKey
+                            ? Icons.visibility_off_outlined
+                            : Icons.visibility_outlined,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: _saving || _testing ? null : _testSingleTurn,
+                    icon: _testing
+                        ? const SizedBox.square(
+                            dimension: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.chat_outlined),
+                    label: Text(_testing ? '正在调用' : '测试单轮对话'),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton(
+                    onPressed: _saving || _testing ? null : _save,
+                    child: _saving
+                        ? const SizedBox.square(
+                            dimension: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Text('保存 AI 配置'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
 }

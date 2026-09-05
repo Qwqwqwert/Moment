@@ -7,6 +7,7 @@ import '../data/note_repository.dart';
 import '../data/todo_repository.dart';
 import '../models/note.dart';
 import '../models/todo.dart';
+import '../services/ai_service.dart';
 import '../services/todo_reminder_service.dart';
 
 class AppController extends ChangeNotifier {
@@ -14,11 +15,13 @@ class AppController extends ChangeNotifier {
     required this.repository,
     required this.attachmentStore,
     this.todoReminderService,
-  });
+    AiSettingsStore? aiSettingsStore,
+  }) : aiSettingsStore = aiSettingsStore ?? AiSettingsStore();
 
   final NoteRepository repository;
   final AttachmentStore attachmentStore;
   final TodoReminderService? todoReminderService;
+  final AiSettingsStore aiSettingsStore;
   StreamSubscription<void>? _subscription;
 
   bool initialized = false;
@@ -29,10 +32,12 @@ class AppController extends ChangeNotifier {
   List<Todo> todos = const [];
   List<Todo> trashedTodos = const [];
   List<String> tags = const [];
+  AiConfig aiConfig = const AiConfig();
 
   Future<void> initialize() async {
     try {
       await repository.initialize();
+      aiConfig = await aiSettingsStore.load();
       _subscription = repository.changes.listen((_) => reload());
       initialized = true;
       await reload();
@@ -135,6 +140,17 @@ class AppController extends ChangeNotifier {
       repository.setFavorite(id, value);
   Future<void> addTag(String tag) => repository.addTag(tag);
   Future<void> deleteTag(String tag) => repository.deleteTag(tag);
+
+  Future<void> saveAiConfig(AiConfig config) async {
+    final normalized = AiConfig(
+      baseUrl: config.baseUrl.trim(),
+      model: config.model.trim(),
+      apiKey: config.apiKey.trim(),
+    );
+    await aiSettingsStore.save(normalized);
+    aiConfig = normalized;
+    notifyListeners();
+  }
 
   @override
   void dispose() {

@@ -17,6 +17,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:video_player/video_player.dart';
 
 import '../models/note.dart';
+import '../services/ai_service.dart';
 import '../state/app_controller.dart';
 import '../utils/tag_name.dart';
 import '../widgets/markdown_code_block.dart';
@@ -546,7 +547,12 @@ class _NoteEditorScreenState extends State<NoteEditorScreen>
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
-      builder: (_) => _TagPickerSheet(app: _app, initialSelected: _tags),
+      builder: (_) => _TagPickerSheet(
+        app: _app,
+        initialSelected: _tags,
+        noteTitle: _titleController.text,
+        noteContent: _contentController.text,
+      ),
     );
     if (!mounted || selected == null) return;
     if (listEquals(_tags, selected)) return;
@@ -1634,10 +1640,17 @@ String _formatMediaDuration(Duration value) {
 }
 
 class _TagPickerSheet extends StatefulWidget {
-  const _TagPickerSheet({required this.app, required this.initialSelected});
+  const _TagPickerSheet({
+    required this.app,
+    required this.initialSelected,
+    required this.noteTitle,
+    required this.noteContent,
+  });
 
   final AppController app;
   final List<String> initialSelected;
+  final String noteTitle;
+  final String noteContent;
 
   @override
   State<_TagPickerSheet> createState() => _TagPickerSheetState();
@@ -1649,6 +1662,7 @@ class _TagPickerSheetState extends State<_TagPickerSheet> {
   late final List<String> _availableTags;
   late final List<String> _selected;
   bool _addingTag = false;
+  bool _generatingAiTags = false;
 
   @override
   void initState() {
@@ -1684,6 +1698,56 @@ class _TagPickerSheetState extends State<_TagPickerSheet> {
     });
   }
 
+  Future<void> _generateAiTags() async {
+    if (_generatingAiTags) return;
+    if (widget.noteTitle.trim().isEmpty && widget.noteContent.trim().isEmpty) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('请先输入笔记标题或内容')));
+      return;
+    }
+
+    FocusManager.instance.primaryFocus?.unfocus();
+    setState(() => _generatingAiTags = true);
+    try {
+      final generated = await AiService(widget.app.aiConfig)
+          .generateTags(title: widget.noteTitle, content: widget.noteContent);
+      if (!mounted) return;
+      final tags = generated
+          .map(normalizeTagName)
+          .where((tag) => tag.isNotEmpty && tag.length <= maxTagNameLength)
+          .toSet()
+          .toList();
+      if (tags.isEmpty) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('AI 没有生成可用标签')));
+        return;
+      }
+
+      final chosen = await showDialog<List<String>>(
+        context: context,
+        builder: (context) => _AiTagSelectionDialog(tags: tags),
+      );
+      if (!mounted || chosen == null || chosen.isEmpty) return;
+
+      for (final tag in chosen) {
+        if (!_availableTags.contains(tag)) {
+          await widget.app.addTag(tag);
+          if (!mounted) return;
+          _availableTags.add(tag);
+        }
+        if (!_selected.contains(tag)) _selected.add(tag);
+      }
+      setState(() {});
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('AI 标签生成失败：$error')));
+      }
+    } finally {
+      if (mounted) setState(() => _generatingAiTags = false);
+    }
+  }
+
   void _finish() {
     FocusManager.instance.primaryFocus?.unfocus();
     Navigator.pop(context, [..._selected]);
@@ -1711,6 +1775,19 @@ class _TagPickerSheetState extends State<_TagPickerSheet> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text('选择标签', style: theme.textTheme.titleLarge),
+              if (widget.app.aiConfig.isComplete) ...[
+                const SizedBox(height: 12),
+                OutlinedButton.icon(
+                  onPressed: _generatingAiTags ? null : _generateAiTags,
+                  icon: _generatingAiTags
+                      ? const SizedBox.square(
+                          dimension: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.auto_awesome_rounded),
+                  label: Text(_generatingAiTags ? '正在生成' : 'AI标签'),
+                ),
+              ],
               const SizedBox(height: 16),
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -1795,6 +1872,59 @@ class _TagPickerSheetState extends State<_TagPickerSheet> {
       ),
     );
   }
+}
+
+class _AiTagSelectionDialog extends StatefulWidget {
+  const _AiTagSelectionDialog({required this.tags});
+
+  final List<String> tags;
+
+  @override
+  State<_AiTagSelectionDialog> createState() => _AiTagSelectionDialogState();
+}
+
+class _AiTagSelectionDialogState extends State<_AiTagSelectionDialog> {
+  late final Set<String> _selected;
+
+  @override
+  void initState() {
+    super.initState();
+    _selected = widget.tags.toSet();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: const Text('选择 AI 生成的标签'),
+    content: SingleChildScrollView(
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 4,
+        children: widget.tags
+            .map(
+              (tag) => FilterChip(
+                label: Text(tag),
+                selected: _selected.contains(tag),
+                onSelected: (selected) => setState(() {
+                  selected ? _selected.add(tag) : _selected.remove(tag);
+                }),
+              ),
+            )
+            .toList(),
+      ),
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.pop(context),
+        child: const Text('取消'),
+      ),
+      FilledButton(
+        onPressed: _selected.isEmpty
+            ? null
+            : () => Navigator.pop(context, _selected.toList()),
+        child: const Text('使用所选标签'),
+      ),
+    ],
+  );
 }
 
 enum _NoteShareExportAction { share, exportMarkdown }
