@@ -29,16 +29,16 @@ void main() {
 
     expect(find.text('新笔记'), findsOneWidget);
     expect(find.text('无标题笔记'), findsOneWidget);
-    expect(find.text('清单'), findsOneWidget);
+    expect(find.text('添加'), findsOneWidget);
 
-    final toolbarBottomBefore = tester.getBottomLeft(find.text('清单')).dy;
+    final toolbarBottomBefore = tester.getBottomLeft(find.text('添加')).dy;
     tester.view.viewInsets = FakeViewPadding(
       bottom: 200 * tester.view.devicePixelRatio,
     );
     addTearDown(tester.view.reset);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 250));
-    final toolbarBottomAfter = tester.getBottomLeft(find.text('清单')).dy;
+    final toolbarBottomAfter = tester.getBottomLeft(find.text('添加')).dy;
     expect(toolbarBottomAfter, lessThan(toolbarBottomBefore - 150));
   });
 
@@ -79,7 +79,7 @@ void main() {
     expect(find.byKey(const Key('markdown-source-editor')), findsNothing);
     expect(find.byKey(const Key('markdown-preview')), findsOneWidget);
     expect(find.byKey(const Key('markdown-selection-area')), findsOneWidget);
-    expect(find.text('清单'), findsNothing);
+    expect(find.text('添加'), findsNothing);
 
     await tester.tap(find.byTooltip('继续编辑'));
     await tester.pumpAndSettle();
@@ -258,7 +258,13 @@ class FakeNoteRepository implements NoteRepository, TodoRepository {
     final selected = ids.toSet();
     final paths = _notes
         .where((note) => selected.contains(note.id))
-        .expand((note) => note.imagePaths)
+        .expand(
+          (note) => [
+            ...note.imagePaths,
+            ...note.videoPaths,
+            ...note.audioPaths,
+          ],
+        )
         .toList();
     _notes.removeWhere((note) => selected.contains(note.id));
     _changes.add(null);

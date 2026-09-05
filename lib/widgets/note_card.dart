@@ -30,10 +30,7 @@ class NoteCard extends StatelessWidget {
               .map((line) => line.trim())
               .where((line) => line.isNotEmpty)
               .toList()
-        : note.checklist
-              .map((item) => item.text.trim())
-              .where((text) => text.isNotEmpty)
-              .toList();
+        : const <String>[];
     final primaryText = hasTitle
         ? note.title.trim()
         : (contentLines.isEmpty ? '无标题笔记' : contentLines.first);
@@ -150,21 +147,6 @@ class NoteCard extends StatelessWidget {
                         }).toList(),
                       ),
                     ),
-                    if (note.checklist.isNotEmpty) ...[
-                      Icon(
-                        Icons.checklist_rounded,
-                        size: 16,
-                        color: colors.outline,
-                      ),
-                      const SizedBox(width: 3),
-                      Text(
-                        '${note.checklist.where((item) => item.isChecked).length}/${note.checklist.length}',
-                        style: theme.textTheme.labelSmall?.copyWith(
-                          color: colors.outline,
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                    ],
                     if (note.imagePaths.isNotEmpty) ...[
                       Icon(
                         Icons.image_outlined,
@@ -174,6 +156,36 @@ class NoteCard extends StatelessWidget {
                       const SizedBox(width: 3),
                       Text(
                         '${note.imagePaths.length}',
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: colors.outline,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                    ],
+                    if (note.videoPaths.isNotEmpty) ...[
+                      Icon(
+                        Icons.videocam_outlined,
+                        size: 16,
+                        color: colors.outline,
+                      ),
+                      const SizedBox(width: 3),
+                      Text(
+                        '${note.videoPaths.length}',
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: colors.outline,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                    ],
+                    if (note.audioPaths.isNotEmpty) ...[
+                      Icon(
+                        Icons.mic_none_rounded,
+                        size: 16,
+                        color: colors.outline,
+                      ),
+                      const SizedBox(width: 3),
+                      Text(
+                        '${note.audioPaths.length}',
                         style: theme.textTheme.labelSmall?.copyWith(
                           color: colors.outline,
                         ),

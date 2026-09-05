@@ -1,21 +1,3 @@
-class ChecklistItem {
-  const ChecklistItem({
-    required this.id,
-    required this.text,
-    this.isChecked = false,
-  });
-
-  final String id;
-  final String text;
-  final bool isChecked;
-
-  ChecklistItem copyWith({String? text, bool? isChecked}) => ChecklistItem(
-    id: id,
-    text: text ?? this.text,
-    isChecked: isChecked ?? this.isChecked,
-  );
-}
-
 class Note {
   const Note({
     required this.id,
@@ -24,8 +6,9 @@ class Note {
     required this.createdAt,
     required this.updatedAt,
     this.imagePaths = const [],
+    this.videoPaths = const [],
+    this.audioPaths = const [],
     this.tags = const [],
-    this.checklist = const [],
     this.isFavorite = false,
     this.deletedAt,
   });
@@ -34,8 +17,9 @@ class Note {
   final String title;
   final String content;
   final List<String> imagePaths;
+  final List<String> videoPaths;
+  final List<String> audioPaths;
   final List<String> tags;
-  final List<ChecklistItem> checklist;
   final DateTime createdAt;
   final DateTime updatedAt;
   final bool isFavorite;
@@ -48,8 +32,9 @@ class Note {
     String? title,
     String? content,
     List<String>? imagePaths,
+    List<String>? videoPaths,
+    List<String>? audioPaths,
     List<String>? tags,
-    List<ChecklistItem>? checklist,
     DateTime? updatedAt,
     bool? isFavorite,
     DateTime? deletedAt,
@@ -59,8 +44,9 @@ class Note {
     title: title ?? this.title,
     content: content ?? this.content,
     imagePaths: imagePaths ?? this.imagePaths,
+    videoPaths: videoPaths ?? this.videoPaths,
+    audioPaths: audioPaths ?? this.audioPaths,
     tags: tags ?? this.tags,
-    checklist: checklist ?? this.checklist,
     createdAt: createdAt,
     updatedAt: updatedAt ?? this.updatedAt,
     isFavorite: isFavorite ?? this.isFavorite,

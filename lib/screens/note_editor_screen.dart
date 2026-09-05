@@ -8,8 +8,13 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
+import 'package:just_audio/just_audio.dart';
+import 'package:photo_view/photo_view.dart';
+import 'package:photo_view/photo_view_gallery.dart';
+import 'package:record/record.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:video_player/video_player.dart';
 
 import '../models/note.dart';
 import '../state/app_controller.dart';
@@ -39,11 +44,16 @@ class _NoteEditorScreenState extends State<NoteEditorScreen>
   late final AppController _app;
   late final TextEditingController _titleController;
   late final TextEditingController _contentController;
+  late final PageController _imagePageController;
+  late final PageController _videoPageController;
   late final String _id;
   late final DateTime _createdAt;
-  final List<_ChecklistEditor> _checklist = [];
   List<String> _images = [];
+  List<String> _videos = [];
+  List<String> _audio = [];
   List<String> _tags = [];
+  int _imagePage = 0;
+  int _videoPage = 0;
   bool _favorite = false;
   bool _persisted = false;
   bool _saving = false;
@@ -71,14 +81,17 @@ class _NoteEditorScreenState extends State<NoteEditorScreen>
     _saveLabel = widget.readOnly ? '只读预览' : (_persisted ? '已保存' : '新笔记');
     _titleController = TextEditingController(text: source?.title ?? '');
     _contentController = TextEditingController(text: source?.content ?? '');
+    _imagePageController = PageController();
+    _videoPageController = PageController();
     _images = [...?source?.imagePaths];
+    _videos = [...?source?.videoPaths];
+    _audio = [...?source?.audioPaths];
     _tags = [...?source?.tags];
     _favorite = source?.isFavorite ?? false;
-    for (final item in source?.checklist ?? const <ChecklistItem>[]) {
-      _checklist.add(_ChecklistEditor(item));
-    }
     if (!widget.readOnly) {
-      WidgetsBinding.instance.addPostFrameCallback((_) => _recoverLostImages());
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => _recoverLostAttachments(),
+      );
     }
   }
 
@@ -92,9 +105,8 @@ class _NoteEditorScreenState extends State<NoteEditorScreen>
     }
     _titleController.dispose();
     _contentController.dispose();
-    for (final item in _checklist) {
-      item.controller.dispose();
-    }
+    _imagePageController.dispose();
+    _videoPageController.dispose();
     super.dispose();
   }
 
@@ -117,13 +129,6 @@ class _NoteEditorScreenState extends State<NoteEditorScreen>
     _saveTimer = Timer(const Duration(seconds: 1), _save);
   }
 
-  void _addChecklist() {
-    setState(() {
-      _checklist.add(_ChecklistEditor(ChecklistItem(id: newId(), text: '')));
-    });
-    _scheduleSave();
-  }
-
   void _setMarkdownPreview(bool value) {
     if (_markdownPreview == value) return;
     FocusManager.instance.primaryFocus?.unfocus();
@@ -134,9 +139,8 @@ class _NoteEditorScreenState extends State<NoteEditorScreen>
     final uri = Uri.tryParse(href.trim());
     if (uri == null || (uri.scheme != 'http' && uri.scheme != 'https')) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('无法打开该链接')));
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('无法打开该链接')));
       }
       return;
     }
@@ -147,9 +151,8 @@ class _NoteEditorScreenState extends State<NoteEditorScreen>
       // The platform can throw when no external handler is available.
     }
     if (!opened && mounted) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('浏览器打开失败')));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('浏览器打开失败')));
     }
   }
 
@@ -203,17 +206,9 @@ class _NoteEditorScreenState extends State<NoteEditorScreen>
     title: _titleController.text,
     content: _contentController.text,
     imagePaths: _images,
+    videoPaths: _videos,
+    audioPaths: _audio,
     tags: _tags,
-    checklist: _checklist
-        .where((item) => item.controller.text.trim().isNotEmpty)
-        .map(
-          (item) => ChecklistItem(
-            id: item.id,
-            text: item.controller.text,
-            isChecked: item.checked,
-          ),
-        )
-        .toList(),
     createdAt: _createdAt,
     updatedAt: DateTime.now(),
     isFavorite: _favorite,
@@ -226,16 +221,6 @@ class _NoteEditorScreenState extends State<NoteEditorScreen>
     if (title.isNotEmpty) sections.add('# $title');
     if (content.isNotEmpty) sections.add(content);
 
-    final checklist = _checklist
-        .where((item) => item.controller.text.trim().isNotEmpty)
-        .map((item) {
-          final text = item.controller.text
-              .replaceAll(RegExp(r'[\r\n]+'), ' ')
-              .trim();
-          return '- [${item.checked ? 'x' : ' '}] $text';
-        })
-        .join('\n');
-    if (checklist.isNotEmpty) sections.add('## 待办\n\n$checklist');
     if (_tags.isNotEmpty) {
       sections.add('标签：${_tags.map((tag) => '#$tag').join(' ')}');
     }
@@ -247,7 +232,9 @@ class _NoteEditorScreenState extends State<NoteEditorScreen>
         .replaceAll(RegExp(r'[\\/:*?"<>|\r\n]+'), ' ')
         .trim();
     if (title.isNotEmpty) {
-      final safeTitle = title.length > 80 ? title.substring(0, 80).trim() : title;
+      final safeTitle = title.length > 80
+          ? title.substring(0, 80).trim()
+          : title;
       return '$safeTitle.md';
     }
     final now = DateTime.now();
@@ -299,9 +286,8 @@ class _NoteEditorScreenState extends State<NoteEditorScreen>
 
   void _showActionMessage(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
-    );
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
   }
 
   void _handleShareExportAction(_NoteShareExportAction action) {
@@ -320,8 +306,9 @@ class _NoteEditorScreenState extends State<NoteEditorScreen>
     final note = _buildNote();
     if (!_persisted &&
         note.isBlank &&
-        note.checklist.isEmpty &&
-        note.imagePaths.isEmpty) {
+        note.imagePaths.isEmpty &&
+        note.videoPaths.isEmpty &&
+        note.audioPaths.isEmpty) {
       if (mounted && !_disposing) setState(() => _saveLabel = '新笔记');
       _dirty = false;
       return;
@@ -331,8 +318,9 @@ class _NoteEditorScreenState extends State<NoteEditorScreen>
     try {
       if (_persisted &&
           note.isBlank &&
-          note.checklist.isEmpty &&
-          note.imagePaths.isEmpty) {
+          note.imagePaths.isEmpty &&
+          note.videoPaths.isEmpty &&
+          note.audioPaths.isEmpty) {
         _discarded = true;
         await _app.trash([note.id]);
       } else {
@@ -370,10 +358,14 @@ class _NoteEditorScreenState extends State<NoteEditorScreen>
     _close();
   }
 
-  Future<void> _recoverLostImages() async {
+  Future<void> _recoverLostAttachments() async {
     final recovered = await _app.attachmentStore.recoverLost(_id);
-    if (recovered.isNotEmpty && mounted) {
-      setState(() => _images = [..._images, ...recovered].take(9).toList());
+    if ((recovered.images.isNotEmpty || recovered.videos.isNotEmpty) &&
+        mounted) {
+      setState(() {
+        _images = [..._images, ...recovered.images];
+        _videos = [..._videos, ...recovered.videos].take(9).toList();
+      });
       _dirty = true;
       await _save();
     }
@@ -381,12 +373,17 @@ class _NoteEditorScreenState extends State<NoteEditorScreen>
 
   Future<void> _pickImages() async {
     try {
-      final added = await _app.attachmentStore.pickAndStore(
-        _id,
-        remaining: 9 - _images.length,
-      );
+      final added = await _app.attachmentStore.pickAndStore(_id);
       if (!mounted || added.isEmpty) return;
+      final wasEmpty = _images.isEmpty;
       setState(() => _images = [..._images, ...added]);
+      if (wasEmpty) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (_imagePageController.hasClients) {
+            _imagePageController.jumpToPage(0);
+          }
+        });
+      }
       _dirty = true;
       await _save();
     } catch (error) {
@@ -397,15 +394,159 @@ class _NoteEditorScreenState extends State<NoteEditorScreen>
     }
   }
 
+  Future<void> _pickVideo() async {
+    try {
+      final added = await _app.attachmentStore.pickVideoAndStore(_id);
+      if (!mounted || added == null) return;
+      final wasEmpty = _videos.isEmpty;
+      setState(() => _videos = [..._videos, added]);
+      if (wasEmpty) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (_videoPageController.hasClients) {
+            _videoPageController.jumpToPage(0);
+          }
+        });
+      }
+      _dirty = true;
+      await _save();
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('选择视频失败：$error')));
+      }
+    }
+  }
+
+  Future<void> _chooseAttachment() async {
+    FocusManager.instance.primaryFocus?.unfocus();
+    final action = await showModalBottomSheet<_AttachmentAction>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.add_photo_alternate_outlined),
+              title: const Text('图片'),
+              onTap: () => Navigator.pop(context, _AttachmentAction.image),
+            ),
+            ListTile(
+              leading: const Icon(Icons.videocam_outlined),
+              title: const Text('视频'),
+              subtitle: _videos.length >= 9 ? const Text('最多添加 9 个视频') : null,
+              enabled: _videos.length < 9,
+              onTap: _videos.length >= 9
+                  ? null
+                  : () => Navigator.pop(context, _AttachmentAction.video),
+            ),
+            ListTile(
+              leading: const Icon(Icons.mic_none_rounded),
+              title: const Text('语音'),
+              onTap: () => Navigator.pop(context, _AttachmentAction.voice),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (!mounted || action == null) return;
+    switch (action) {
+      case _AttachmentAction.image:
+        await _pickImages();
+        break;
+      case _AttachmentAction.video:
+        await _pickVideo();
+        break;
+      case _AttachmentAction.voice:
+        await _chooseVoice();
+        break;
+    }
+  }
+
+  Future<void> _chooseVoice() async {
+    FocusManager.instance.primaryFocus?.unfocus();
+    final action = await showModalBottomSheet<_VoiceAction>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.mic_rounded),
+              title: const Text('录制语音'),
+              onTap: () => Navigator.pop(context, _VoiceAction.record),
+            ),
+            ListTile(
+              leading: const Icon(Icons.audio_file_outlined),
+              title: const Text('导入现有语音'),
+              onTap: () => Navigator.pop(context, _VoiceAction.import),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (!mounted || action == null) return;
+    switch (action) {
+      case _VoiceAction.record:
+        await _recordVoice();
+        break;
+      case _VoiceAction.import:
+        await _importVoice();
+        break;
+    }
+  }
+
+  Future<void> _recordVoice() async {
+    final recorder = AudioRecorder();
+    try {
+      final allowed = await recorder.hasPermission();
+      if (!mounted) return;
+      if (!allowed) {
+        _showActionMessage('需要麦克风权限才能录制语音');
+        return;
+      }
+      final path = await _app.attachmentStore.createAudioRecordingPath(_id);
+      if (!mounted) return;
+      final recordedPath = await showModalBottomSheet<String>(
+        context: context,
+        isDismissible: false,
+        enableDrag: false,
+        showDragHandle: true,
+        builder: (context) =>
+            _VoiceRecorderSheet(recorder: recorder, path: path),
+      );
+      if (!mounted || recordedPath == null) return;
+      setState(() => _audio = [..._audio, recordedPath]);
+      _dirty = true;
+      await _save();
+    } catch (error) {
+      _showActionMessage('录制语音失败：$error');
+    } finally {
+      await recorder.dispose();
+    }
+  }
+
+  Future<void> _importVoice() async {
+    try {
+      final path = await _app.attachmentStore.importAudioAndStore(_id);
+      if (!mounted || path == null) return;
+      setState(() => _audio = [..._audio, path]);
+      _dirty = true;
+      await _save();
+    } catch (error) {
+      _showActionMessage('导入语音失败：$error');
+    }
+  }
+
   Future<void> _chooseTags() async {
     final selected = await showModalBottomSheet<List<String>>(
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
-      builder: (_) => _TagPickerSheet(
-        app: _app,
-        initialSelected: _tags,
-      ),
+      builder: (_) => _TagPickerSheet(app: _app, initialSelected: _tags),
     );
     if (!mounted || selected == null) return;
     if (listEquals(_tags, selected)) return;
@@ -498,15 +639,6 @@ class _NoteEditorScreenState extends State<NoteEditorScreen>
               Divider(
                 color: theme.colorScheme.outlineVariant.withValues(alpha: .55),
               ),
-              if (_checklist.isNotEmpty) ...[
-                const SizedBox(height: 10),
-                for (var index = 0; index < _checklist.length; index++)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: _checklistRow(index),
-                  ),
-                const SizedBox(height: 8),
-              ],
               AnimatedSwitcher(
                 duration: const Duration(milliseconds: 180),
                 switchInCurve: Curves.easeOutCubic,
@@ -554,9 +686,7 @@ class _NoteEditorScreenState extends State<NoteEditorScreen>
                                 child: SizedBox(
                                   width: double.infinity,
                                   child: SelectionArea(
-                                    key: const Key(
-                                      'markdown-selection-area',
-                                    ),
+                                    key: const Key('markdown-selection-area'),
                                     child: MarkdownBody(
                                       key: const Key('markdown-preview'),
                                       data: _contentController.text,
@@ -578,19 +708,33 @@ class _NoteEditorScreenState extends State<NoteEditorScreen>
                               ),
                       ),
               ),
-              if (_images.isNotEmpty) ...[
+              if (_images.isNotEmpty || _videos.isNotEmpty) ...[
                 const SizedBox(height: 24),
-                GridView.builder(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 3,
-                    crossAxisSpacing: 10,
-                    mainAxisSpacing: 10,
+                SizedBox(
+                  height: 220,
+                  child: Row(
+                    children: [
+                      if (_images.isNotEmpty) Expanded(child: _imageGallery()),
+                      if (_images.isNotEmpty && _videos.isNotEmpty)
+                        const SizedBox(width: 10),
+                      if (_videos.isNotEmpty) Expanded(child: _videoGallery()),
+                    ],
                   ),
-                  itemCount: _images.length,
-                  itemBuilder: (context, index) => _imageTile(index),
                 ),
+              ],
+              if (_audio.isNotEmpty) ...[
+                const SizedBox(height: 20),
+                for (var index = 0; index < _audio.length; index++)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: _AudioAttachmentTile(
+                      key: ValueKey(_audio[index]),
+                      path: _audio[index],
+                      index: index,
+                      readOnly: widget.readOnly,
+                      onRemove: () => _removeAudio(index),
+                    ),
+                  ),
               ],
             ],
           ),
@@ -623,8 +767,7 @@ class _NoteEditorScreenState extends State<NoteEditorScreen>
                   : _EditorBottomBar(
                       key: const ValueKey('edit-bottom-bar'),
                       onTags: _chooseTags,
-                      onChecklist: _addChecklist,
-                      onImages: _images.length >= 9 ? null : _pickImages,
+                      onAdd: _chooseAttachment,
                     ),
             ),
         ],
@@ -695,126 +838,803 @@ class _NoteEditorScreenState extends State<NoteEditorScreen>
                   : _EditorBottomBar(
                       key: const ValueKey('edit-bottom-bar'),
                       onTags: _chooseTags,
-                      onChecklist: _addChecklist,
-                      onImages: _images.length >= 9 ? null : _pickImages,
+                      onAdd: _chooseAttachment,
                     ),
             ),
-    );
-  }
-
-  Widget _checklistRow(int index) {
-    final item = _checklist[index];
-    final colors = Theme.of(context).colorScheme;
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: colors.surfaceContainerLow,
-        borderRadius: BorderRadius.circular(14),
-      ),
-      child: Row(
-        children: [
-          Checkbox(
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(5),
-            ),
-            value: item.checked,
-            onChanged: widget.readOnly
-                ? null
-                : (value) {
-                    setState(() => item.checked = value ?? false);
-                    _scheduleSave();
-                  },
-          ),
-          Expanded(
-            child: TextField(
-              controller: item.controller,
-              readOnly: widget.readOnly,
-              decoration: const InputDecoration(
-                hintText: '清单内容',
-                filled: false,
-                border: InputBorder.none,
-                enabledBorder: InputBorder.none,
-                focusedBorder: InputBorder.none,
-                contentPadding: EdgeInsets.symmetric(vertical: 12),
-              ),
-              style: TextStyle(
-                decoration: item.checked ? TextDecoration.lineThrough : null,
-                color: item.checked ? colors.onSurfaceVariant : null,
-              ),
-              onChanged: (_) => _scheduleSave(),
-            ),
-          ),
-          if (!widget.readOnly)
-            IconButton(
-              tooltip: '移除',
-              onPressed: () {
-                setState(() => _checklist.removeAt(index).controller.dispose());
-                _scheduleSave();
-              },
-              icon: const Icon(Icons.close_rounded, size: 19),
-            ),
-          const SizedBox(width: 4),
-        ],
-      ),
     );
   }
 
   String _formatDate(DateTime date) =>
       '${date.year}年${date.month}月${date.day}日  ${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
 
-  Widget _imageTile(int index) => Stack(
-    fit: StackFit.expand,
-    children: [
-      InkWell(
-        onTap: () => showDialog<void>(
-          context: context,
-          builder: (context) => Dialog.fullscreen(
-            child: Stack(
-              children: [
-                Center(
-                  child: InteractiveViewer(
-                    child: Image.file(File(_images[index])),
+  Widget _imageGallery() => ClipRRect(
+    borderRadius: BorderRadius.circular(14),
+    child: Stack(
+      fit: StackFit.expand,
+      children: [
+        PageView.builder(
+          controller: _imagePageController,
+          itemCount: _images.length,
+          onPageChanged: (value) => setState(() => _imagePage = value),
+          itemBuilder: (context, index) => GestureDetector(
+            onTap: () => showDialog<void>(
+              context: context,
+              builder: (context) =>
+                  _ImageGalleryDialog(paths: _images, initialIndex: index),
+            ),
+            child: ColoredBox(
+              color: Theme.of(context).colorScheme.surfaceContainerLow,
+              child: Image.file(
+                File(_images[index]),
+                fit: BoxFit.cover,
+                errorBuilder: (context, error, stackTrace) =>
+                    const Center(child: Icon(Icons.broken_image_outlined)),
+              ),
+            ),
+          ),
+        ),
+        Positioned(
+          left: 10,
+          bottom: 10,
+          child: _MediaCounter(current: _imagePage + 1, total: _images.length),
+        ),
+        if (!widget.readOnly)
+          Positioned(
+            right: 8,
+            top: 8,
+            child: IconButton.filledTonal(
+              tooltip: '移除当前图片',
+              visualDensity: VisualDensity.compact,
+              onPressed: () => _removeImage(_imagePage),
+              icon: const Icon(Icons.close_rounded, size: 18),
+            ),
+          ),
+      ],
+    ),
+  );
+
+  Widget _videoGallery() => ClipRRect(
+    borderRadius: BorderRadius.circular(14),
+    child: Stack(
+      fit: StackFit.expand,
+      children: [
+        PageView.builder(
+          controller: _videoPageController,
+          itemCount: _videos.length,
+          onPageChanged: (value) => setState(() => _videoPage = value),
+          itemBuilder: (context, index) => _VideoThumbnail(
+            key: ValueKey(_videos[index]),
+            path: _videos[index],
+            readOnly: widget.readOnly,
+            onPlay: () => showDialog<void>(
+              context: context,
+              builder: (context) =>
+                  _VideoPlayerDialog(paths: _videos, initialIndex: index),
+            ),
+            onRemove: () => _removeVideo(index),
+          ),
+        ),
+        Positioned(
+          left: 10,
+          bottom: 10,
+          child: _MediaCounter(current: _videoPage + 1, total: _videos.length),
+        ),
+      ],
+    ),
+  );
+
+  Future<void> _removeImage(int index) async {
+    final removed = _images[index];
+    setState(() {
+      _images.removeAt(index);
+      if (_images.isEmpty) {
+        _imagePage = 0;
+      } else if (_imagePage >= _images.length) {
+        _imagePage = _images.length - 1;
+      }
+    });
+    if (_images.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (_imagePageController.hasClients) {
+          _imagePageController.jumpToPage(_imagePage);
+        }
+      });
+    }
+    _dirty = true;
+    await _save();
+    await _app.attachmentStore.deleteFiles([removed]);
+  }
+
+  Future<void> _removeVideo(int index) async {
+    final removed = _videos[index];
+    setState(() {
+      _videos.removeAt(index);
+      if (_videos.isEmpty) {
+        _videoPage = 0;
+      } else if (_videoPage >= _videos.length) {
+        _videoPage = _videos.length - 1;
+      }
+    });
+    if (_videos.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (_videoPageController.hasClients) {
+          _videoPageController.jumpToPage(_videoPage);
+        }
+      });
+    }
+    _dirty = true;
+    await _save();
+    await _app.attachmentStore.deleteFiles([removed]);
+  }
+
+  Future<void> _removeAudio(int index) async {
+    final removed = _audio[index];
+    setState(() => _audio.removeAt(index));
+    _dirty = true;
+    await _save();
+    await _app.attachmentStore.deleteFiles([removed]);
+  }
+}
+
+class _ImageGalleryDialog extends StatefulWidget {
+  const _ImageGalleryDialog({required this.paths, required this.initialIndex});
+
+  final List<String> paths;
+  final int initialIndex;
+
+  @override
+  State<_ImageGalleryDialog> createState() => _ImageGalleryDialogState();
+}
+
+class _ImageGalleryDialogState extends State<_ImageGalleryDialog> {
+  late final PageController _controller;
+  late int _page;
+
+  @override
+  void initState() {
+    super.initState();
+    _page = widget.initialIndex;
+    _controller = PageController(initialPage: _page);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => Dialog.fullscreen(
+    backgroundColor: Colors.black,
+    child: SafeArea(
+      child: Stack(
+        children: [
+          PhotoViewGallery.builder(
+            pageController: _controller,
+            itemCount: widget.paths.length,
+            onPageChanged: (value) => setState(() => _page = value),
+            backgroundDecoration: const BoxDecoration(color: Colors.black),
+            loadingBuilder: (context, event) =>
+                const Center(child: CircularProgressIndicator()),
+            builder: (context, index) => PhotoViewGalleryPageOptions(
+              imageProvider: FileImage(File(widget.paths[index])),
+              initialScale: PhotoViewComputedScale.contained,
+              minScale: PhotoViewComputedScale.contained,
+              maxScale: PhotoViewComputedScale.covered * 5,
+            ),
+          ),
+          Positioned(
+            left: 4,
+            top: 4,
+            child: IconButton(
+              tooltip: '关闭',
+              onPressed: () => Navigator.pop(context),
+              icon: const Icon(Icons.close_rounded, color: Colors.white),
+            ),
+          ),
+          Positioned(
+            right: 16,
+            top: 10,
+            child: _MediaCounter(
+              current: _page + 1,
+              total: widget.paths.length,
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+class _MediaCounter extends StatelessWidget {
+  const _MediaCounter({required this.current, required this.total});
+
+  final int current;
+  final int total;
+
+  @override
+  Widget build(BuildContext context) => DecoratedBox(
+    decoration: BoxDecoration(
+      color: Colors.black54,
+      borderRadius: BorderRadius.circular(16),
+    ),
+    child: Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      child: Text(
+        '$current / $total',
+        style: Theme.of(context).textTheme.labelMedium
+            ?.copyWith(color: Colors.white, fontWeight: FontWeight.w600),
+      ),
+    ),
+  );
+}
+
+class _VideoThumbnail extends StatefulWidget {
+  const _VideoThumbnail({
+    super.key,
+    required this.path,
+    required this.readOnly,
+    required this.onPlay,
+    required this.onRemove,
+  });
+
+  final String path;
+  final bool readOnly;
+  final VoidCallback onPlay;
+  final VoidCallback onRemove;
+
+  @override
+  State<_VideoThumbnail> createState() => _VideoThumbnailState();
+}
+
+class _VideoThumbnailState extends State<_VideoThumbnail> {
+  late final VideoPlayerController _controller;
+  late final Future<void> _initialize;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = VideoPlayerController.file(File(widget.path));
+    _initialize = _prepareThumbnail();
+  }
+
+  Future<void> _prepareThumbnail() async {
+    await _controller.initialize();
+    await _controller.setVolume(0);
+    await _controller.seekTo(const Duration(milliseconds: 1));
+    await _controller.pause();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => ClipRRect(
+    borderRadius: BorderRadius.circular(14),
+    child: Material(
+      color: Colors.black,
+      child: InkWell(
+        onTap: widget.onPlay,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            FutureBuilder<void>(
+              future: _initialize,
+              builder: (context, snapshot) {
+                if (snapshot.hasError) {
+                  return const Center(
+                    child: Icon(
+                      Icons.videocam_off_outlined,
+                      color: Colors.white70,
+                      size: 40,
+                    ),
+                  );
+                }
+                if (snapshot.connectionState != ConnectionState.done) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                return FittedBox(
+                  fit: BoxFit.cover,
+                  clipBehavior: Clip.hardEdge,
+                  child: SizedBox.fromSize(
+                    size: _controller.value.size,
+                    child: VideoPlayer(_controller),
+                  ),
+                );
+              },
+            ),
+            const Center(
+              child: Icon(
+                Icons.play_circle_fill_rounded,
+                color: Colors.white,
+                size: 52,
+                shadows: [Shadow(color: Colors.black54, blurRadius: 8)],
+              ),
+            ),
+            if (!widget.readOnly)
+              Positioned(
+                right: 6,
+                top: 6,
+                child: IconButton.filledTonal(
+                  tooltip: '移除视频',
+                  visualDensity: VisualDensity.compact,
+                  onPressed: widget.onRemove,
+                  icon: const Icon(Icons.close_rounded, size: 18),
+                ),
+              ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
+class _VideoPlayerDialog extends StatefulWidget {
+  const _VideoPlayerDialog({required this.paths, required this.initialIndex});
+
+  final List<String> paths;
+  final int initialIndex;
+
+  @override
+  State<_VideoPlayerDialog> createState() => _VideoPlayerDialogState();
+}
+
+class _VideoPlayerDialogState extends State<_VideoPlayerDialog> {
+  late final PageController _pageController;
+  late int _page;
+
+  @override
+  void initState() {
+    super.initState();
+    _page = widget.initialIndex;
+    _pageController = PageController(initialPage: _page);
+  }
+
+  @override
+  void dispose() {
+    _pageController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => Dialog.fullscreen(
+    backgroundColor: Colors.black,
+    child: SafeArea(
+      child: Stack(
+        children: [
+          PageView.builder(
+            controller: _pageController,
+            itemCount: widget.paths.length,
+            onPageChanged: (value) => setState(() => _page = value),
+            itemBuilder: (context, index) => _VideoPlayerPage(
+              key: ValueKey(widget.paths[index]),
+              path: widget.paths[index],
+              active: index == _page,
+            ),
+          ),
+          Positioned(
+            left: 4,
+            top: 4,
+            child: IconButton(
+              tooltip: '关闭',
+              onPressed: () => Navigator.pop(context),
+              icon: const Icon(Icons.close_rounded, color: Colors.white),
+            ),
+          ),
+          Positioned(
+            right: 16,
+            top: 10,
+            child: _MediaCounter(
+              current: _page + 1,
+              total: widget.paths.length,
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+class _VideoPlayerPage extends StatefulWidget {
+  const _VideoPlayerPage({super.key, required this.path, required this.active});
+
+  final String path;
+  final bool active;
+
+  @override
+  State<_VideoPlayerPage> createState() => _VideoPlayerPageState();
+}
+
+class _VideoPlayerPageState extends State<_VideoPlayerPage> {
+  late final VideoPlayerController _controller;
+  late final Future<void> _initialize;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = VideoPlayerController.file(File(widget.path));
+    _initialize = _prepare();
+  }
+
+  Future<void> _prepare() async {
+    await _controller.initialize();
+    if (widget.active) await _controller.play();
+  }
+
+  @override
+  void didUpdateWidget(covariant _VideoPlayerPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.active == widget.active || !_controller.value.isInitialized) {
+      return;
+    }
+    if (widget.active) {
+      unawaited(_controller.play());
+    } else {
+      unawaited(_controller.pause());
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => Center(
+    child: FutureBuilder<void>(
+      future: _initialize,
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return const Text('视频无法播放', style: TextStyle(color: Colors.white));
+        }
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const CircularProgressIndicator();
+        }
+        return ValueListenableBuilder<VideoPlayerValue>(
+          valueListenable: _controller,
+          builder: (context, value, child) => Stack(
+            fit: StackFit.expand,
+            children: [
+              GestureDetector(
+                onTap: () =>
+                    value.isPlaying ? _controller.pause() : _controller.play(),
+                child: Center(
+                  child: AspectRatio(
+                    aspectRatio: value.aspectRatio,
+                    child: VideoPlayer(_controller),
                   ),
                 ),
-                SafeArea(
-                  child: IconButton(
-                    onPressed: () => Navigator.pop(context),
-                    icon: const Icon(Icons.close),
+              ),
+              if (!value.isPlaying)
+                IgnorePointer(
+                  child: Center(
+                    child: Icon(
+                      Icons.play_circle_fill_rounded,
+                      color: Colors.white.withValues(alpha: .9),
+                      size: 64,
+                    ),
+                  ),
+                ),
+              Positioned(
+                left: 16,
+                right: 16,
+                bottom: 12,
+                child: VideoProgressIndicator(
+                  _controller,
+                  allowScrubbing: true,
+                  colors: const VideoProgressColors(
+                    playedColor: Colors.white,
+                    bufferedColor: Colors.white38,
+                    backgroundColor: Colors.white24,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    ),
+  );
+}
+
+class _VoiceRecorderSheet extends StatefulWidget {
+  const _VoiceRecorderSheet({required this.recorder, required this.path});
+
+  final AudioRecorder recorder;
+  final String path;
+
+  @override
+  State<_VoiceRecorderSheet> createState() => _VoiceRecorderSheetState();
+}
+
+class _VoiceRecorderSheetState extends State<_VoiceRecorderSheet> {
+  Timer? _timer;
+  Duration _elapsed = Duration.zero;
+  bool _recording = false;
+  bool _stopping = false;
+  Object? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_start());
+  }
+
+  Future<void> _start() async {
+    try {
+      await widget.recorder.start(
+        const RecordConfig(
+          encoder: AudioEncoder.aacLc,
+          bitRate: 128000,
+          sampleRate: 44100,
+        ),
+        path: widget.path,
+      );
+      if (!mounted) return;
+      setState(() => _recording = true);
+      _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+        if (mounted) {
+          setState(() => _elapsed += const Duration(seconds: 1));
+        }
+      });
+    } catch (error) {
+      if (mounted) setState(() => _error = error);
+    }
+  }
+
+  Future<void> _finish() async {
+    if (!_recording || _stopping) return;
+    setState(() => _stopping = true);
+    _timer?.cancel();
+    final path = await widget.recorder.stop();
+    if (path == null) {
+      final file = File(widget.path);
+      if (await file.exists()) await file.delete();
+    }
+    if (mounted) Navigator.pop(context, path);
+  }
+
+  Future<void> _cancel() async {
+    if (_stopping) return;
+    setState(() => _stopping = true);
+    _timer?.cancel();
+    if (_recording) {
+      await widget.recorder.cancel();
+    } else {
+      final file = File(widget.path);
+      if (await file.exists()) await file.delete();
+    }
+    if (mounted) Navigator.pop(context);
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => PopScope(
+    canPop: false,
+    onPopInvokedWithResult: (didPop, result) {
+      if (!didPop) unawaited(_cancel());
+    },
+    child: SafeArea(
+      top: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(24, 12, 24, 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              _error == null ? Icons.mic_rounded : Icons.mic_off_rounded,
+              size: 48,
+              color: _error == null
+                  ? Theme.of(context).colorScheme.error
+                  : Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+            const SizedBox(height: 12),
+            Text(
+              _error == null ? '正在录音' : '无法开始录音',
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
+            const SizedBox(height: 6),
+            Text(
+              _error == null ? _formatMediaDuration(_elapsed) : '请稍后重试',
+              style: Theme.of(context).textTheme.headlineSmall,
+            ),
+            const SizedBox(height: 24),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: _stopping ? null : _cancel,
+                    child: const Text('取消'),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: FilledButton.icon(
+                    onPressed: _recording && !_stopping ? _finish : null,
+                    icon: const Icon(Icons.stop_rounded),
+                    label: const Text('完成'),
                   ),
                 ),
               ],
             ),
-          ),
-        ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(12),
-          child: Image.file(File(_images[index]), fit: BoxFit.cover),
+          ],
         ),
       ),
-      if (!widget.readOnly)
-        Positioned(
-          right: 4,
-          top: 4,
-          child: IconButton.filledTonal(
-            visualDensity: VisualDensity.compact,
-            onPressed: () async {
-              final removed = _images[index];
-              setState(() => _images.removeAt(index));
-              _dirty = true;
-              await _save();
-              await _app.attachmentStore.deleteFiles([removed]);
-            },
-            icon: const Icon(Icons.close, size: 18),
-          ),
-        ),
-    ],
+    ),
   );
 }
 
-class _TagPickerSheet extends StatefulWidget {
-  const _TagPickerSheet({
-    required this.app,
-    required this.initialSelected,
+class _AudioAttachmentTile extends StatefulWidget {
+  const _AudioAttachmentTile({
+    super.key,
+    required this.path,
+    required this.index,
+    required this.readOnly,
+    required this.onRemove,
   });
+
+  final String path;
+  final int index;
+  final bool readOnly;
+  final VoidCallback onRemove;
+
+  @override
+  State<_AudioAttachmentTile> createState() => _AudioAttachmentTileState();
+}
+
+class _AudioAttachmentTileState extends State<_AudioAttachmentTile> {
+  late final AudioPlayer _player;
+  late final Future<Duration?> _load;
+
+  @override
+  void initState() {
+    super.initState();
+    _player = AudioPlayer();
+    _load = _player.setFilePath(widget.path);
+  }
+
+  @override
+  void dispose() {
+    unawaited(_player.dispose());
+    super.dispose();
+  }
+
+  Future<void> _toggle(PlayerState state) async {
+    if (state.processingState == ProcessingState.completed) {
+      await _player.seek(Duration.zero);
+    }
+    if (state.playing && state.processingState != ProcessingState.completed) {
+      await _player.pause();
+    } else {
+      unawaited(_player.play());
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Material(
+      color: colors.surfaceContainerLow,
+      borderRadius: BorderRadius.circular(14),
+      clipBehavior: Clip.antiAlias,
+      child: FutureBuilder<Duration?>(
+        future: _load,
+        builder: (context, durationSnapshot) {
+          if (durationSnapshot.hasError) {
+            return ListTile(
+              leading: const Icon(Icons.error_outline_rounded),
+              title: Text('语音 ${widget.index + 1}'),
+              subtitle: const Text('音频无法播放'),
+              trailing: widget.readOnly
+                  ? null
+                  : IconButton(
+                      tooltip: '移除语音',
+                      onPressed: widget.onRemove,
+                      icon: const Icon(Icons.close_rounded),
+                    ),
+            );
+          }
+          if (durationSnapshot.connectionState != ConnectionState.done) {
+            return const SizedBox(
+              height: 72,
+              child: Center(child: CircularProgressIndicator()),
+            );
+          }
+          final duration = durationSnapshot.data ?? Duration.zero;
+          return StreamBuilder<PlayerState>(
+            stream: _player.playerStateStream,
+            initialData: _player.playerState,
+            builder: (context, stateSnapshot) {
+              final state = stateSnapshot.data ?? _player.playerState;
+              return StreamBuilder<Duration>(
+                stream: _player.positionStream,
+                initialData: _player.position,
+                builder: (context, positionSnapshot) {
+                  final position = positionSnapshot.data ?? Duration.zero;
+                  final maximum = duration.inMilliseconds.toDouble();
+                  final value = position.inMilliseconds
+                      .clamp(0, duration.inMilliseconds)
+                      .toDouble();
+                  return Padding(
+                    padding: const EdgeInsets.fromLTRB(8, 6, 6, 6),
+                    child: Row(
+                      children: [
+                        IconButton.filledTonal(
+                          tooltip:
+                              state.processingState == ProcessingState.completed
+                              ? '重新播放'
+                              : (state.playing ? '暂停' : '播放'),
+                          onPressed: () => _toggle(state),
+                          icon: Icon(
+                            state.processingState == ProcessingState.completed
+                                ? Icons.replay_rounded
+                                : state.playing
+                                ? Icons.pause_rounded
+                                : Icons.play_arrow_rounded,
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                '语音 ${widget.index + 1}',
+                                style: Theme.of(context).textTheme.labelLarge,
+                              ),
+                              Slider(
+                                value: maximum == 0 ? 0 : value,
+                                max: maximum == 0 ? 1 : maximum,
+                                onChanged: maximum == 0
+                                    ? null
+                                    : (value) => _player.seek(
+                                        Duration(milliseconds: value.round()),
+                                      ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Text(
+                          '${_formatMediaDuration(position > duration ? duration : position)} / ${_formatMediaDuration(duration)}',
+                          style: Theme.of(context).textTheme.labelMedium,
+                        ),
+                        if (!widget.readOnly)
+                          IconButton(
+                            tooltip: '移除语音',
+                            onPressed: widget.onRemove,
+                            icon: const Icon(Icons.close_rounded),
+                          ),
+                      ],
+                    ),
+                  );
+                },
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
+}
+
+String _formatMediaDuration(Duration value) {
+  final hours = value.inHours;
+  final minutes = value.inMinutes.remainder(60).toString().padLeft(2, '0');
+  final seconds = value.inSeconds.remainder(60).toString().padLeft(2, '0');
+  return hours > 0 ? '$hours:$minutes:$seconds' : '$minutes:$seconds';
+}
+
+class _TagPickerSheet extends StatefulWidget {
+  const _TagPickerSheet({required this.app, required this.initialSelected});
 
   final AppController app;
   final List<String> initialSelected;
@@ -825,9 +1645,7 @@ class _TagPickerSheet extends StatefulWidget {
 
 class _TagPickerSheetState extends State<_TagPickerSheet> {
   final _tagController = TextEditingController();
-  final _tagLengthLimiter = LengthLimitingTextInputFormatter(
-    maxTagNameLength,
-  );
+  final _tagLengthLimiter = LengthLimitingTextInputFormatter(maxTagNameLength);
   late final List<String> _availableTags;
   late final List<String> _selected;
   bool _addingTag = false;
@@ -850,9 +1668,8 @@ class _TagPickerSheetState extends State<_TagPickerSheet> {
     if (value.isEmpty || _addingTag) return;
     final validationMessage = validateNewTagName(value, _availableTags);
     if (validationMessage != null) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(validationMessage)));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(validationMessage)));
       return;
     }
 
@@ -980,17 +1797,11 @@ class _TagPickerSheetState extends State<_TagPickerSheet> {
   }
 }
 
-class _ChecklistEditor {
-  _ChecklistEditor(ChecklistItem item)
-    : id = item.id,
-      checked = item.isChecked,
-      controller = TextEditingController(text: item.text);
-  final String id;
-  bool checked;
-  final TextEditingController controller;
-}
-
 enum _NoteShareExportAction { share, exportMarkdown }
+
+enum _VoiceAction { record, import }
+
+enum _AttachmentAction { image, video, voice }
 
 class _ShareExportMenu extends StatelessWidget {
   const _ShareExportMenu({required this.onSelected});
@@ -998,34 +1809,33 @@ class _ShareExportMenu extends StatelessWidget {
   final ValueChanged<_NoteShareExportAction> onSelected;
 
   @override
-  Widget build(BuildContext context) =>
-      PopupMenuButton<_NoteShareExportAction>(
-        tooltip: '分享与导出',
-        icon: const Icon(Icons.ios_share_rounded),
-        onSelected: onSelected,
-        itemBuilder: (context) => const [
-          PopupMenuItem(
-            value: _NoteShareExportAction.share,
-            child: Row(
-              children: [
-                Icon(Icons.share_outlined),
-                SizedBox(width: 12),
-                Text('分享'),
-              ],
-            ),
-          ),
-          PopupMenuItem(
-            value: _NoteShareExportAction.exportMarkdown,
-            child: Row(
-              children: [
-                Icon(Icons.download_outlined),
-                SizedBox(width: 12),
-                Text('导出为 .md'),
-              ],
-            ),
-          ),
-        ],
-      );
+  Widget build(BuildContext context) => PopupMenuButton<_NoteShareExportAction>(
+    tooltip: '分享与导出',
+    icon: const Icon(Icons.ios_share_rounded),
+    onSelected: onSelected,
+    itemBuilder: (context) => const [
+      PopupMenuItem(
+        value: _NoteShareExportAction.share,
+        child: Row(
+          children: [
+            Icon(Icons.share_outlined),
+            SizedBox(width: 12),
+            Text('分享'),
+          ],
+        ),
+      ),
+      PopupMenuItem(
+        value: _NoteShareExportAction.exportMarkdown,
+        child: Row(
+          children: [
+            Icon(Icons.download_outlined),
+            SizedBox(width: 12),
+            Text('导出为 .md'),
+          ],
+        ),
+      ),
+    ],
+  );
 }
 
 class _EditorToolbar extends StatelessWidget {
@@ -1107,13 +1917,11 @@ class _EditorBottomBar extends StatelessWidget {
   const _EditorBottomBar({
     super.key,
     required this.onTags,
-    required this.onChecklist,
-    required this.onImages,
+    required this.onAdd,
   });
 
   final VoidCallback onTags;
-  final VoidCallback onChecklist;
-  final VoidCallback? onImages;
+  final VoidCallback onAdd;
 
   @override
   Widget build(BuildContext context) {
@@ -1137,14 +1945,9 @@ class _EditorBottomBar extends StatelessWidget {
               onPressed: onTags,
             ),
             _EditorAction(
-              icon: Icons.check_box_outlined,
-              label: '清单',
-              onPressed: onChecklist,
-            ),
-            _EditorAction(
-              icon: Icons.add_photo_alternate_outlined,
-              label: '图片',
-              onPressed: onImages,
+              icon: Icons.add_circle_outline_rounded,
+              label: '添加',
+              onPressed: onAdd,
             ),
           ],
         ),
@@ -1166,13 +1969,13 @@ class _EditorAction extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.only(right: 4),
+    padding: const EdgeInsets.only(right: 2),
     child: TextButton.icon(
       onPressed: onPressed,
       icon: Icon(icon, size: 20),
       label: Text(label),
       style: TextButton.styleFrom(
-        padding: const EdgeInsets.symmetric(horizontal: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 6),
         visualDensity: VisualDensity.compact,
       ),
     ),

@@ -38,11 +38,7 @@ class _SearchNotesScreenState extends State<SearchNotesScreen> {
     final query = _query.text.trim().toLowerCase();
     if (query.isEmpty) return const [];
     return notes.where((note) {
-      final haystack = [
-        note.title,
-        note.content,
-        ...note.checklist.map((item) => item.text),
-      ].join('\n').toLowerCase();
+      final haystack = [note.title, note.content].join('\n').toLowerCase();
       final date = DateTime(
         note.updatedAt.year,
         note.updatedAt.month,
@@ -618,7 +614,7 @@ class _TrashScreenState extends State<TrashScreen> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('永久删除？'),
-        content: Text('${values.length} 条笔记及其图片将无法恢复。'),
+        content: Text('${values.length} 条笔记及其附件将无法恢复。'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),

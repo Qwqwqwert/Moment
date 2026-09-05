@@ -37,7 +37,7 @@ class SqliteNoteRepository implements NoteRepository, TodoRepository {
     final root = await getDatabasesPath();
     _database = await openDatabase(
       p.join(root, 'moment.sqlite'),
-      version: 5,
+      version: 7,
       onConfigure: (db) => db.execute('PRAGMA foreign_keys = ON'),
       onCreate: (db, version) async {
         await db.execute('''
@@ -71,11 +71,18 @@ class SqliteNoteRepository implements NoteRepository, TodoRepository {
           )
         ''');
         await db.execute('''
-          CREATE TABLE checklist_items (
-            id TEXT PRIMARY KEY,
+          CREATE TABLE video_attachments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
             note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
-            text TEXT NOT NULL,
-            checked INTEGER NOT NULL DEFAULT 0,
+            path TEXT NOT NULL,
+            sort_order INTEGER NOT NULL
+          )
+        ''');
+        await db.execute('''
+          CREATE TABLE audio_attachments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+            path TEXT NOT NULL,
             sort_order INTEGER NOT NULL
           )
         ''');
@@ -104,6 +111,27 @@ class SqliteNoteRepository implements NoteRepository, TodoRepository {
               'ALTER TABLE todos ADD COLUMN reminder_enabled INTEGER NOT NULL DEFAULT 0',
             );
           }
+        }
+        if (oldVersion < 6) {
+          await db.execute('DROP TABLE IF EXISTS checklist_items');
+          await db.execute('''
+            CREATE TABLE video_attachments (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+              path TEXT NOT NULL,
+              sort_order INTEGER NOT NULL
+            )
+          ''');
+        }
+        if (oldVersion < 7) {
+          await db.execute('''
+            CREATE TABLE audio_attachments (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+              path TEXT NOT NULL,
+              sort_order INTEGER NOT NULL
+            )
+          ''');
         }
       },
     );
@@ -172,8 +200,16 @@ class SqliteNoteRepository implements NoteRepository, TodoRepository {
       whereArgs: [id],
       orderBy: 'sort_order',
     );
-    final checklistRows = await _db.query(
-      'checklist_items',
+    final videoRows = await _db.query(
+      'video_attachments',
+      columns: ['path'],
+      where: 'note_id = ?',
+      whereArgs: [id],
+      orderBy: 'sort_order',
+    );
+    final audioRows = await _db.query(
+      'audio_attachments',
+      columns: ['path'],
       where: 'note_id = ?',
       whereArgs: [id],
       orderBy: 'sort_order',
@@ -183,16 +219,9 @@ class SqliteNoteRepository implements NoteRepository, TodoRepository {
       title: row['title']! as String,
       content: row['content']! as String,
       imagePaths: imageRows.map((e) => e['path']! as String).toList(),
+      videoPaths: videoRows.map((e) => e['path']! as String).toList(),
+      audioPaths: audioRows.map((e) => e['path']! as String).toList(),
       tags: tagRows.map((e) => e['tag_name']! as String).toList(),
-      checklist: checklistRows
-          .map(
-            (e) => ChecklistItem(
-              id: e['id']! as String,
-              text: e['text']! as String,
-              isChecked: e['checked'] == 1,
-            ),
-          )
-          .toList(),
       createdAt: DateTime.fromMillisecondsSinceEpoch(row['created_at']! as int),
       updatedAt: DateTime.fromMillisecondsSinceEpoch(row['updated_at']! as int),
       isFavorite: row['favorite'] == 1,
@@ -262,17 +291,26 @@ class SqliteNoteRepository implements NoteRepository, TodoRepository {
         });
       }
       await txn.delete(
-        'checklist_items',
+        'video_attachments',
         where: 'note_id = ?',
         whereArgs: [note.id],
       );
-      for (var i = 0; i < note.checklist.length; i++) {
-        final item = note.checklist[i];
-        await txn.insert('checklist_items', {
-          'id': item.id,
+      for (var i = 0; i < note.videoPaths.length; i++) {
+        await txn.insert('video_attachments', {
           'note_id': note.id,
-          'text': item.text,
-          'checked': item.isChecked ? 1 : 0,
+          'path': note.videoPaths[i],
+          'sort_order': i,
+        });
+      }
+      await txn.delete(
+        'audio_attachments',
+        where: 'note_id = ?',
+        whereArgs: [note.id],
+      );
+      for (var i = 0; i < note.audioPaths.length; i++) {
+        await txn.insert('audio_attachments', {
+          'note_id': note.id,
+          'path': note.audioPaths[i],
           'sort_order': i,
         });
       }
@@ -313,13 +351,19 @@ class SqliteNoteRepository implements NoteRepository, TodoRepository {
     final values = ids.toList();
     if (values.isEmpty) return [];
     final marks = List.filled(values.length, '?').join(',');
-    final images = await _db.rawQuery(
-      'SELECT path FROM attachments WHERE note_id IN ($marks)',
-      values,
+    final attachments = await _db.rawQuery(
+      '''
+      SELECT path FROM attachments WHERE note_id IN ($marks)
+      UNION ALL
+      SELECT path FROM video_attachments WHERE note_id IN ($marks)
+      UNION ALL
+      SELECT path FROM audio_attachments WHERE note_id IN ($marks)
+    ''',
+      [...values, ...values, ...values],
     );
     await _db.rawDelete('DELETE FROM notes WHERE id IN ($marks)', values);
     _changes.add(null);
-    return images.map((e) => e['path']! as String).toList();
+    return attachments.map((e) => e['path']! as String).toList();
   }
 
   @override
