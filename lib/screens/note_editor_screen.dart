@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../models/note.dart';
 import '../state/app_controller.dart';
@@ -123,6 +124,29 @@ class _NoteEditorScreenState extends State<NoteEditorScreen>
     setState(() => _markdownPreview = value);
   }
 
+  Future<void> _openMarkdownLink(String href) async {
+    final uri = Uri.tryParse(href.trim());
+    if (uri == null || (uri.scheme != 'http' && uri.scheme != 'https')) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('无法打开该链接')));
+      }
+      return;
+    }
+    var opened = false;
+    try {
+      opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } catch (_) {
+      // The platform can throw when no external handler is available.
+    }
+    if (!opened && mounted) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('浏览器打开失败')));
+    }
+  }
+
   MarkdownStyleSheet _markdownStyle(ThemeData theme) {
     final colors = theme.colorScheme;
     final base = MarkdownStyleSheet.fromTheme(theme);
@@ -141,6 +165,7 @@ class _NoteEditorScreenState extends State<NoteEditorScreen>
       ),
       code: TextStyle(
         color: colors.error,
+        backgroundColor: Colors.transparent,
         fontFamily: 'monospace',
         fontSize: 14,
       ),
@@ -422,6 +447,11 @@ class _NoteEditorScreenState extends State<NoteEditorScreen>
                                   data: _contentController.text,
                                   selectable: false,
                                   styleSheet: _markdownStyle(theme),
+                                  onTapLink: (text, href, title) {
+                                    if (href != null) {
+                                      unawaited(_openMarkdownLink(href));
+                                    }
+                                  },
                                 ),
                               ),
                       ),
