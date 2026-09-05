@@ -37,7 +37,7 @@ class SqliteNoteRepository implements NoteRepository, TodoRepository {
     final root = await getDatabasesPath();
     _database = await openDatabase(
       p.join(root, 'moment.sqlite'),
-      version: 3,
+      version: 4,
       onConfigure: (db) => db.execute('PRAGMA foreign_keys = ON'),
       onCreate: (db, version) async {
         await db.execute('''
@@ -87,11 +87,18 @@ class SqliteNoteRepository implements NoteRepository, TodoRepository {
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
           await _createTodosTable(db);
-        } else if (oldVersion < 3) {
-          await db.execute('ALTER TABLE todos ADD COLUMN repeat_day INTEGER');
-          await db.execute(
-            'ALTER TABLE todos ADD COLUMN repeat_month INTEGER',
-          );
+        } else {
+          if (oldVersion < 3) {
+            await db.execute('ALTER TABLE todos ADD COLUMN repeat_day INTEGER');
+            await db.execute(
+              'ALTER TABLE todos ADD COLUMN repeat_month INTEGER',
+            );
+          }
+          if (oldVersion < 4) {
+            await db.execute(
+              "ALTER TABLE todos ADD COLUMN priority TEXT NOT NULL DEFAULT 'p1'",
+            );
+          }
         }
       },
     );
@@ -104,6 +111,7 @@ class SqliteNoteRepository implements NoteRepository, TodoRepository {
         title TEXT NOT NULL,
         description TEXT NOT NULL,
         due_at INTEGER NOT NULL,
+        priority TEXT NOT NULL DEFAULT 'p1',
         repeat_type TEXT NOT NULL DEFAULT 'none',
         repeat_day INTEGER,
         repeat_month INTEGER,
@@ -123,6 +131,10 @@ class SqliteNoteRepository implements NoteRepository, TodoRepository {
     title: row['title']! as String,
     description: row['description']! as String,
     dueAt: DateTime.fromMillisecondsSinceEpoch(row['due_at']! as int),
+    priority: TodoPriority.values.firstWhere(
+      (value) => value.name == row['priority'],
+      orElse: () => TodoPriority.p1,
+    ),
     repeat: TodoRepeat.values.firstWhere(
       (value) => value.name == row['repeat_type'],
       orElse: () => TodoRepeat.none,
@@ -346,7 +358,9 @@ class SqliteNoteRepository implements NoteRepository, TodoRepository {
     final rows = await _db.query(
       'todos',
       where: where.join(' AND '),
-      orderBy: deleted ? 'deleted_at DESC' : 'due_at ASC',
+      orderBy: deleted
+          ? 'deleted_at DESC'
+          : 'due_at ASC, priority ASC, created_at ASC',
     );
     return rows.map(_todoFromRow).toList();
   }
@@ -367,6 +381,7 @@ class SqliteNoteRepository implements NoteRepository, TodoRepository {
     'title': todo.title,
     'description': todo.description,
     'due_at': todo.dueAt.millisecondsSinceEpoch,
+    'priority': todo.priority.name,
     'repeat_type': todo.repeat.name,
     'repeat_day': todo.repeatDayOfMonth,
     'repeat_month': todo.repeatMonth,

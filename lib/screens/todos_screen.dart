@@ -17,6 +17,14 @@ enum _TodoTimeGroup { overdue, withinSevenDays, afterSevenDays }
 
 const _todoCompletionAnimationDuration = Duration(milliseconds: 420);
 
+int _compareTodos(Todo a, Todo b) {
+  final dueAtComparison = a.dueAt.compareTo(b.dueAt);
+  if (dueAtComparison != 0) return dueAtComparison;
+  final priorityComparison = a.priority.index.compareTo(b.priority.index);
+  if (priorityComparison != 0) return priorityComparison;
+  return a.createdAt.compareTo(b.createdAt);
+}
+
 class _TodosScreenState extends State<TodosScreen> {
   late DateTime _selected;
   late DateTime _visibleMonth;
@@ -24,6 +32,10 @@ class _TodosScreenState extends State<TodosScreen> {
   bool _withinSevenDaysExpanded = true;
   bool _afterSevenDaysExpanded = false;
   final _completingTodoIds = <String>{};
+  final _todoKeys = <String, GlobalKey>{};
+  DateTime? _flashDate;
+  int _flashGeneration = 0;
+  int _revealRequest = 0;
 
   @override
   void initState() {
@@ -39,27 +51,54 @@ class _TodosScreenState extends State<TodosScreen> {
       firstDate: DateTime(2000),
       lastDate: DateTime(2100),
     );
-    if (value != null) {
-      setState(() {
-        _selected = DateUtils.dateOnly(value);
-        _visibleMonth = DateTime(value.year, value.month);
-        _focusGroupFor(value);
-      });
-    }
+    if (value != null) _selectDate(value);
   }
 
   void _changeMonth(int offset) => setState(() {
     _visibleMonth = DateTime(_visibleMonth.year, _visibleMonth.month + offset);
   });
 
-  void _selectDate(DateTime value) => setState(() {
-    _selected = DateUtils.dateOnly(value);
-    if (value.year != _visibleMonth.year ||
-        value.month != _visibleMonth.month) {
-      _visibleMonth = DateTime(value.year, value.month);
-    }
-    _focusGroupFor(value);
-  });
+  void _selectDate(DateTime value) {
+    final selected = DateUtils.dateOnly(value);
+    setState(() {
+      _selected = selected;
+      _flashDate = null;
+      if (value.year != _visibleMonth.year ||
+          value.month != _visibleMonth.month) {
+        _visibleMonth = DateTime(value.year, value.month);
+      }
+      _focusGroupFor(value);
+    });
+    _revealTodosFor(selected, ++_revealRequest);
+  }
+
+  Future<void> _revealTodosFor(DateTime date, int request) async {
+    final matching =
+        AppScope.read(context).todos
+            .where(
+              (todo) =>
+                  !todo.isCompleted && DateUtils.isSameDay(todo.dueAt, date),
+            )
+            .toList()
+          ..sort(_compareTodos);
+    if (matching.isEmpty) return;
+    final targetId = matching.first.id;
+    await Future<void>.delayed(const Duration(milliseconds: 240));
+    if (!mounted || request != _revealRequest) return;
+    final targetContext = _todoKeys[targetId]?.currentContext;
+    if (targetContext == null) return;
+    await Scrollable.ensureVisible(
+      targetContext,
+      duration: const Duration(milliseconds: 360),
+      curve: Curves.easeInOutCubic,
+      alignment: .12,
+    );
+    if (!mounted || request != _revealRequest) return;
+    setState(() {
+      _flashDate = date;
+      _flashGeneration++;
+    });
+  }
 
   _TodoTimeGroup _groupFor(DateTime value) {
     final today = DateUtils.dateOnly(DateTime.now());
@@ -154,7 +193,7 @@ class _TodosScreenState extends State<TodosScreen> {
   Widget build(BuildContext context) {
     final app = AppScope.of(context);
     final todos = app.todos.where((todo) => !todo.isCompleted).toList()
-      ..sort((a, b) => a.dueAt.compareTo(b.dueAt));
+      ..sort(_compareTodos);
     final overdue = todos
         .where((todo) => _groupFor(todo.dueAt) == _TodoTimeGroup.overdue)
         .toList();
@@ -167,6 +206,7 @@ class _TodosScreenState extends State<TodosScreen> {
         .where((todo) => _groupFor(todo.dueAt) == _TodoTimeGroup.afterSevenDays)
         .toList();
     final activeTodoIds = todos.map((todo) => todo.id).toSet();
+    _todoKeys.removeWhere((id, _) => !activeTodoIds.contains(id));
     final finishedAnimations = _completingTodoIds
         .where((id) => !activeTodoIds.contains(id))
         .toSet();
@@ -222,7 +262,9 @@ class _TodosScreenState extends State<TodosScreen> {
                   expanded: _overdueExpanded,
                   countColor: theme.colorScheme.error,
                   completingTodoIds: _completingTodoIds,
-                  selectedDate: _selected,
+                  flashDate: _flashDate,
+                  flashGeneration: _flashGeneration,
+                  todoKeys: _todoKeys,
                   onToggle: () =>
                       setState(() => _overdueExpanded = !_overdueExpanded),
                   onOpen: _openEditor,
@@ -234,7 +276,9 @@ class _TodosScreenState extends State<TodosScreen> {
                   todos: withinSevenDays,
                   expanded: _withinSevenDaysExpanded,
                   completingTodoIds: _completingTodoIds,
-                  selectedDate: _selected,
+                  flashDate: _flashDate,
+                  flashGeneration: _flashGeneration,
+                  todoKeys: _todoKeys,
                   onToggle: () => setState(
                     () => _withinSevenDaysExpanded = !_withinSevenDaysExpanded,
                   ),
@@ -247,7 +291,9 @@ class _TodosScreenState extends State<TodosScreen> {
                   todos: afterSevenDays,
                   expanded: _afterSevenDaysExpanded,
                   completingTodoIds: _completingTodoIds,
-                  selectedDate: _selected,
+                  flashDate: _flashDate,
+                  flashGeneration: _flashGeneration,
+                  todoKeys: _todoKeys,
                   onToggle: () => setState(
                     () => _afterSevenDaysExpanded = !_afterSevenDaysExpanded,
                   ),
@@ -833,7 +879,9 @@ class _TodoGroupSection extends StatelessWidget {
     required this.expanded,
     required this.completingTodoIds,
     this.countColor,
-    required this.selectedDate,
+    required this.flashDate,
+    required this.flashGeneration,
+    required this.todoKeys,
     required this.onToggle,
     required this.onOpen,
     required this.onComplete,
@@ -844,7 +892,9 @@ class _TodoGroupSection extends StatelessWidget {
   final bool expanded;
   final Set<String> completingTodoIds;
   final Color? countColor;
-  final DateTime selectedDate;
+  final DateTime? flashDate;
+  final int flashGeneration;
+  final Map<String, GlobalKey> todoKeys;
   final VoidCallback onToggle;
   final ValueChanged<Todo> onOpen;
   final ValueChanged<Todo> onComplete;
@@ -912,13 +962,13 @@ class _TodoGroupSection extends StatelessWidget {
                     children: todos
                         .map(
                           (todo) => _TodoCard(
-                            key: ValueKey(todo.id),
+                            key: todoKeys.putIfAbsent(todo.id, GlobalKey.new),
                             todo: todo,
                             completing: completingTodoIds.contains(todo.id),
-                            highlighted: DateUtils.isSameDay(
-                              todo.dueAt,
-                              selectedDate,
-                            ),
+                            flashToken:
+                                DateUtils.isSameDay(todo.dueAt, flashDate)
+                                ? flashGeneration
+                                : 0,
                             onTap: () => onOpen(todo),
                             onComplete: () => onComplete(todo),
                           ),
@@ -957,109 +1007,153 @@ class _TodoEmpty extends StatelessWidget {
   );
 }
 
-class _TodoCard extends StatelessWidget {
+class _TodoCard extends StatefulWidget {
   const _TodoCard({
     super.key,
     required this.todo,
     required this.onTap,
     required this.onComplete,
     this.completed = false,
-    this.highlighted = false,
     this.completing = false,
+    this.flashToken = 0,
   });
   final Todo todo;
   final VoidCallback onTap;
   final VoidCallback onComplete;
   final bool completed;
-  final bool highlighted;
   final bool completing;
+  final int flashToken;
+
+  @override
+  State<_TodoCard> createState() => _TodoCardState();
+}
+
+class _TodoCardState extends State<_TodoCard>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _flashController;
+  late final Animation<double> _flash;
+
+  @override
+  void initState() {
+    super.initState();
+    _flashController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 720),
+    );
+    _flash =
+        TweenSequence<double>([
+          TweenSequenceItem(tween: Tween(begin: 0, end: 1), weight: 1),
+          TweenSequenceItem(tween: Tween(begin: 1, end: 0), weight: 1),
+          TweenSequenceItem(tween: Tween(begin: 0, end: 1), weight: 1),
+          TweenSequenceItem(tween: Tween(begin: 1, end: 0), weight: 1),
+        ]).animate(
+          CurvedAnimation(parent: _flashController, curve: Curves.easeInOut),
+        );
+  }
+
+  @override
+  void didUpdateWidget(covariant _TodoCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.flashToken > 0 && widget.flashToken != oldWidget.flashToken) {
+      _flashController.forward(from: 0);
+    }
+  }
+
+  @override
+  void dispose() {
+    _flashController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final overdue = !completed && todo.dueAt.isBefore(DateTime.now());
-    final card = Card(
-      margin: const EdgeInsets.only(bottom: 10),
-      elevation: 0,
-      color: highlighted
-          ? theme.colorScheme.primaryContainer.withValues(alpha: .62)
-          : null,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(18),
-        side: highlighted
-            ? BorderSide(color: theme.colorScheme.primary, width: 1.5)
-            : BorderSide.none,
-      ),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(18),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(10, 12, 14, 12),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              IconButton(
-                tooltip: completed ? '恢复待办' : '完成待办',
-                onPressed: onComplete,
-                icon: AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 180),
-                  transitionBuilder: (child, animation) =>
-                      ScaleTransition(scale: animation, child: child),
-                  child: Icon(
-                    completed || completing
-                        ? Icons.check_circle_rounded
-                        : Icons.radio_button_unchecked_rounded,
-                    key: ValueKey(completed || completing),
-                    color: completed || completing
-                        ? Colors.green
-                        : theme.colorScheme.primary,
+    final overdue =
+        !widget.completed && widget.todo.dueAt.isBefore(DateTime.now());
+    final card = AnimatedBuilder(
+      animation: _flash,
+      builder: (context, child) => Card(
+        margin: const EdgeInsets.only(bottom: 10),
+        elevation: 0,
+        color: Color.lerp(
+          theme.cardTheme.color ?? theme.colorScheme.surface,
+          theme.colorScheme.primaryContainer,
+          _flash.value * .82,
+        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(18),
+          onTap: widget.onTap,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(10, 12, 14, 12),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                IconButton(
+                  tooltip: widget.completed ? '恢复待办' : '完成待办',
+                  onPressed: widget.onComplete,
+                  icon: AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 180),
+                    transitionBuilder: (child, animation) =>
+                        ScaleTransition(scale: animation, child: child),
+                    child: Icon(
+                      widget.completed || widget.completing
+                          ? Icons.check_circle_rounded
+                          : Icons.radio_button_unchecked_rounded,
+                      key: ValueKey(widget.completed || widget.completing),
+                      color: widget.completed || widget.completing
+                          ? Colors.green
+                          : theme.colorScheme.primary,
+                    ),
                   ),
                 ),
-              ),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      todo.title,
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w600,
-                        decoration: completed
-                            ? TextDecoration.lineThrough
-                            : null,
-                      ),
-                    ),
-                    if (todo.description.isNotEmpty) ...[
-                      const SizedBox(height: 4),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
                       Text(
-                        todo.description,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          color: theme.colorScheme.onSurfaceVariant,
+                        widget.todo.title,
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w600,
+                          decoration: widget.completed
+                              ? TextDecoration.lineThrough
+                              : null,
                         ),
+                      ),
+                      if (widget.todo.description.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          widget.todo.description,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: 9),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 6,
+                        children: [
+                          _TodoPriorityBadge(priority: widget.todo.priority),
+                          _TodoMeta(
+                            icon: Icons.schedule_rounded,
+                            label: _todoDateTimeLabel(widget.todo.dueAt),
+                            alert: overdue,
+                          ),
+                          if (widget.todo.repeat != TodoRepeat.none)
+                            _TodoMeta(
+                              icon: Icons.repeat_rounded,
+                              label: _repeatLabel(widget.todo.repeat),
+                            ),
+                        ],
                       ),
                     ],
-                    const SizedBox(height: 9),
-                    Wrap(
-                      spacing: 8,
-                      children: [
-                        _TodoMeta(
-                          icon: Icons.schedule_rounded,
-                          label: _todoDateTimeLabel(todo.dueAt),
-                          alert: overdue,
-                        ),
-                        if (todo.repeat != TodoRepeat.none)
-                          _TodoMeta(
-                            icon: Icons.repeat_rounded,
-                            label: _repeatLabel(todo.repeat),
-                          ),
-                      ],
-                    ),
-                  ],
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -1067,7 +1161,7 @@ class _TodoCard extends StatelessWidget {
     return TweenAnimationBuilder<double>(
       duration: _todoCompletionAnimationDuration,
       curve: Curves.easeInOutCubic,
-      tween: Tween<double>(begin: 1, end: completing ? 0 : 1),
+      tween: Tween<double>(begin: 1, end: widget.completing ? 0 : 1),
       builder: (context, value, child) => ClipRect(
         child: Align(
           alignment: Alignment.topCenter,
@@ -1081,7 +1175,7 @@ class _TodoCard extends StatelessWidget {
           ),
         ),
       ),
-      child: IgnorePointer(ignoring: completing, child: card),
+      child: IgnorePointer(ignoring: widget.completing, child: card),
     );
   }
 }
@@ -1110,6 +1204,37 @@ class _TodoMeta extends StatelessWidget {
   }
 }
 
+class _TodoPriorityBadge extends StatelessWidget {
+  const _TodoPriorityBadge({required this.priority});
+
+  final TodoPriority priority;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final (background, foreground) = switch (priority) {
+      TodoPriority.p0 => (colors.errorContainer, colors.onErrorContainer),
+      TodoPriority.p1 => (colors.primaryContainer, colors.onPrimaryContainer),
+      TodoPriority.p2 => (
+        colors.surfaceContainerHighest,
+        colors.onSurfaceVariant,
+      ),
+    };
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Text(
+        priority.name.toUpperCase(),
+        style: Theme.of(context).textTheme.labelSmall
+            ?.copyWith(color: foreground, fontWeight: FontWeight.w800),
+      ),
+    );
+  }
+}
+
 class TodoEditorScreen extends StatefulWidget {
   const TodoEditorScreen({super.key, this.todoId, required this.initialDate});
   final String? todoId;
@@ -1123,6 +1248,7 @@ class _TodoEditorScreenState extends State<TodoEditorScreen> {
   late final TextEditingController _title;
   late final TextEditingController _description;
   late DateTime _dueAt;
+  late TodoPriority _priority;
   late TodoRepeat _repeat;
   Todo? _source;
   bool _repeatScheduleChanged = false;
@@ -1144,7 +1270,8 @@ class _TodoEditorScreenState extends State<TodoEditorScreen> {
     final initial = widget.initialDate;
     _dueAt =
         _source?.dueAt ??
-        DateTime(initial.year, initial.month, initial.day, 18);
+        DateTime(initial.year, initial.month, initial.day, 10);
+    _priority = _source?.priority ?? TodoPriority.p1;
     _repeat = _source?.repeat ?? TodoRepeat.none;
     _title = TextEditingController(text: _source?.title ?? '');
     _description = TextEditingController(text: _source?.description ?? '');
@@ -1213,6 +1340,7 @@ class _TodoEditorScreenState extends State<TodoEditorScreen> {
         title: title,
         description: _description.text.trim(),
         dueAt: _dueAt,
+        priority: _priority,
         repeat: _repeat,
         repeatDayOfMonth:
             _repeat == TodoRepeat.monthly || _repeat == TodoRepeat.yearly
@@ -1326,6 +1454,22 @@ class _TodoEditorScreenState extends State<TodoEditorScreen> {
               ),
             ),
           ],
+        ),
+        const SizedBox(height: 22),
+        Text('优先级', style: Theme.of(context).textTheme.titleSmall),
+        const SizedBox(height: 10),
+        Wrap(
+          spacing: 8,
+          children: TodoPriority.values
+              .map(
+                (value) => ChoiceChip(
+                  showCheckmark: false,
+                  label: Text(value.name.toUpperCase()),
+                  selected: _priority == value,
+                  onSelected: (_) => setState(() => _priority = value),
+                ),
+              )
+              .toList(),
         ),
         const SizedBox(height: 22),
         Text('重复', style: Theme.of(context).textTheme.titleSmall),

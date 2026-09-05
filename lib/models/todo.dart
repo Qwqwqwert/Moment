@@ -2,6 +2,8 @@ import 'note.dart';
 
 enum TodoRepeat { none, daily, weekly, monthly, yearly }
 
+enum TodoPriority { p0, p1, p2 }
+
 class Todo {
   const Todo({
     required this.id,
@@ -10,6 +12,7 @@ class Todo {
     required this.createdAt,
     required this.updatedAt,
     this.description = '',
+    this.priority = TodoPriority.p1,
     this.repeat = TodoRepeat.none,
     this.repeatDayOfMonth,
     this.repeatMonth,
@@ -21,6 +24,7 @@ class Todo {
   final String title;
   final String description;
   final DateTime dueAt;
+  final TodoPriority priority;
   final TodoRepeat repeat;
   final int? repeatDayOfMonth;
   final int? repeatMonth;
@@ -35,6 +39,7 @@ class Todo {
     String? title,
     String? description,
     DateTime? dueAt,
+    TodoPriority? priority,
     TodoRepeat? repeat,
     int? repeatDayOfMonth,
     int? repeatMonth,
@@ -47,6 +52,7 @@ class Todo {
     title: title ?? this.title,
     description: description ?? this.description,
     dueAt: dueAt ?? this.dueAt,
+    priority: priority ?? this.priority,
     repeat: repeat ?? this.repeat,
     repeatDayOfMonth: repeatDayOfMonth ?? this.repeatDayOfMonth,
     repeatMonth: repeatMonth ?? this.repeatMonth,
@@ -58,19 +64,22 @@ class Todo {
 
   Todo? nextOccurrence({DateTime? dueAtOverride}) {
     if (repeat == TodoRepeat.none) return null;
-    final next = dueAtOverride ?? switch (repeat) {
-      TodoRepeat.daily => dueAt.add(const Duration(days: 1)),
-      TodoRepeat.weekly => dueAt.add(const Duration(days: 7)),
-      TodoRepeat.monthly => _nextMonthly(dueAt),
-      TodoRepeat.yearly => _nextYearly(dueAt),
-      TodoRepeat.none => dueAt,
-    };
+    final next =
+        dueAtOverride ??
+        switch (repeat) {
+          TodoRepeat.daily => dueAt.add(const Duration(days: 1)),
+          TodoRepeat.weekly => dueAt.add(const Duration(days: 7)),
+          TodoRepeat.monthly => _nextMonthly(dueAt),
+          TodoRepeat.yearly => _nextYearly(dueAt),
+          TodoRepeat.none => dueAt,
+        };
     final now = DateTime.now();
     return Todo(
       id: newId(),
       title: title,
       description: description,
       dueAt: next,
+      priority: priority,
       repeat: repeat,
       repeatDayOfMonth:
           repeat == TodoRepeat.monthly || repeat == TodoRepeat.yearly
