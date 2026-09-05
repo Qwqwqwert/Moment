@@ -9,6 +9,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../models/note.dart';
 import '../state/app_controller.dart';
 import '../utils/tag_name.dart';
+import '../widgets/markdown_code_block.dart';
 
 class NoteEditorScreen extends StatefulWidget {
   const NoteEditorScreen({
@@ -440,18 +441,31 @@ class _NoteEditorScreenState extends State<NoteEditorScreen>
                                   color: theme.colorScheme.onSurfaceVariant,
                                 ),
                               )
-                            : SelectionArea(
-                                key: const Key('markdown-selection-area'),
-                                child: MarkdownBody(
-                                  key: const Key('markdown-preview'),
-                                  data: _contentController.text,
-                                  selectable: false,
-                                  styleSheet: _markdownStyle(theme),
-                                  onTapLink: (text, href, title) {
-                                    if (href != null) {
-                                      unawaited(_openMarkdownLink(href));
-                                    }
-                                  },
+                            : Align(
+                                alignment: Alignment.topLeft,
+                                child: SizedBox(
+                                  width: double.infinity,
+                                  child: SelectionArea(
+                                    key: const Key(
+                                      'markdown-selection-area',
+                                    ),
+                                    child: MarkdownBody(
+                                      key: const Key('markdown-preview'),
+                                      data: _contentController.text,
+                                      selectable: false,
+                                      styleSheet: _markdownStyle(theme),
+                                      builders: {
+                                        'pre': MarkdownCodeBlockBuilder(
+                                          colors: theme.colorScheme,
+                                        ),
+                                      },
+                                      onTapLink: (text, href, title) {
+                                        if (href != null) {
+                                          unawaited(_openMarkdownLink(href));
+                                        }
+                                      },
+                                    ),
+                                  ),
                                 ),
                               ),
                       ),

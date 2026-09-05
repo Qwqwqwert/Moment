@@ -111,7 +111,7 @@ class NoteCard extends StatelessWidget {
                 if (hasSecondaryText) ...[
                   const SizedBox(height: 4),
                   Text(
-                    secondaryText!,
+                    secondaryText,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: theme.textTheme.bodyMedium?.copyWith(
