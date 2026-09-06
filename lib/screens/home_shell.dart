@@ -1,5 +1,11 @@
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 
+import '../models/note.dart';
+import '../state/app_controller.dart';
+import '../widgets/note_card.dart';
+import 'note_editor_screen.dart';
 import 'notes_home_screen.dart';
 import 'todos_screen.dart';
 
@@ -11,7 +17,41 @@ class HomeShell extends StatefulWidget {
 }
 
 class _HomeShellState extends State<HomeShell> {
+  static const _historyTodayChancePercent = 6;
+
   var _index = 0;
+  bool _historyTodayChecked = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final app = AppScope.of(context);
+    if (_historyTodayChecked || app.loading) return;
+    _historyTodayChecked = true;
+
+    final now = DateTime.now();
+    final memories = app.notes.where((note) {
+      final created = note.createdAt;
+      return created.year < now.year &&
+          created.month == now.month &&
+          created.day == now.day;
+    }).toList()..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+
+    if (memories.isEmpty ||
+        Random.secure().nextInt(100) >= _historyTodayChancePercent) {
+      return;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _showHistoryToday(memories, now);
+    });
+  }
+
+  Future<void> _showHistoryToday(List<Note> notes, DateTime now) async {
+    await showDialog<void>(
+      context: context,
+      builder: (context) => _HistoryTodayDialog(notes: notes, today: now),
+    );
+  }
 
   @override
   Widget build(BuildContext context) => Scaffold(
@@ -52,6 +92,90 @@ class _HomeShellState extends State<HomeShell> {
       ),
     ),
   );
+}
+
+class _HistoryTodayDialog extends StatelessWidget {
+  const _HistoryTodayDialog({required this.notes, required this.today});
+
+  final List<Note> notes;
+  final DateTime today;
+
+  @override
+  Widget build(BuildContext context) {
+    final maxContentHeight = min(
+      MediaQuery.sizeOf(context).height * .45,
+      380.0,
+    );
+    return AlertDialog(
+      icon: Icon(
+        Icons.auto_stories_rounded,
+        color: Theme.of(context).colorScheme.primary,
+      ),
+      title: const Text('历史的今天'),
+      content: SizedBox(
+        width: 520,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: maxContentHeight),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '往年的今天，你曾留下 ${notes.length} 段记录。时间向前走着，那些当时的想法仍在这里等你。',
+                style: Theme.of(context).textTheme.bodyLarge,
+              ),
+              const SizedBox(height: 16),
+              Flexible(
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: notes.length,
+                  itemBuilder: (context, index) {
+                    final note = notes[index];
+                    final yearsAgo = today.year - note.createdAt.year;
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(4, 0, 4, 6),
+                          child: Text(
+                            '${note.createdAt.year} 年 · $yearsAgo 年前',
+                            style: Theme.of(context).textTheme.labelLarge
+                                ?.copyWith(
+                                  color: Theme.of(context).colorScheme.primary,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                          ),
+                        ),
+                        NoteCard(
+                          note: note,
+                          onTap: () => Navigator.push<void>(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => NoteEditorScreen(
+                                noteId: note.id,
+                                readOnly: true,
+                                historyPreview: true,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('关闭'),
+        ),
+      ],
+    );
+  }
 }
 
 class _PageFade extends StatelessWidget {

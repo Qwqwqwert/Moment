@@ -27,12 +27,16 @@ class NoteEditorScreen extends StatefulWidget {
     super.key,
     this.noteId,
     this.readOnly = false,
+    this.deleted = false,
+    this.historyPreview = false,
     this.embedded = false,
     this.onSaved,
-  });
+  }) : assert(!historyPreview || readOnly);
 
   final String? noteId;
   final bool readOnly;
+  final bool deleted;
+  final bool historyPreview;
   final bool embedded;
   final VoidCallback? onSaved;
 
@@ -74,7 +78,7 @@ class _NoteEditorScreenState extends State<NoteEditorScreen>
     _app = AppScope.read(context);
     final source = widget.noteId == null
         ? null
-        : _app.findNote(widget.noteId!, deleted: widget.readOnly);
+        : _app.findNote(widget.noteId!, deleted: widget.deleted);
     final now = DateTime.now();
     _id = source?.id ?? newId();
     _createdAt = source?.createdAt ?? now;
@@ -89,6 +93,7 @@ class _NoteEditorScreenState extends State<NoteEditorScreen>
     _audio = [...?source?.audioPaths];
     _tags = [...?source?.tags];
     _favorite = source?.isFavorite ?? false;
+    _markdownPreview = widget.readOnly || widget.historyPreview;
     if (!widget.readOnly) {
       WidgetsBinding.instance.addPostFrameCallback(
         (_) => _recoverLostAttachments(),
@@ -605,6 +610,37 @@ class _NoteEditorScreenState extends State<NoteEditorScreen>
           child: ListView(
             padding: const EdgeInsets.fromLTRB(24, 18, 24, 56),
             children: [
+              if (widget.historyPreview) ...[
+                Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.primaryContainer.withValues(
+                      alpha: .55,
+                    ),
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.auto_stories_rounded,
+                        color: theme.colorScheme.primary,
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          '来自 ${_createdAt.year} 年的今天 · '
+                          '${DateTime.now().year - _createdAt.year} 年前',
+                          style: theme.textTheme.titleSmall?.copyWith(
+                            color: theme.colorScheme.onPrimaryContainer,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+              ],
               Text(
                 _formatDate(_createdAt),
                 style: theme.textTheme.labelMedium?.copyWith(
@@ -613,26 +649,40 @@ class _NoteEditorScreenState extends State<NoteEditorScreen>
                 ),
               ),
               const SizedBox(height: 10),
-              TextField(
-                controller: _titleController,
-                readOnly: widget.readOnly,
-                onChanged: widget.readOnly ? null : (_) => _scheduleSave(),
-                maxLength: 20,
-                maxLines: null,
-                decoration: const InputDecoration(
-                  hintText: '无标题笔记',
-                  counterText: '',
-                  filled: false,
-                  border: InputBorder.none,
-                  enabledBorder: InputBorder.none,
-                  focusedBorder: InputBorder.none,
-                  contentPadding: EdgeInsets.zero,
+              if (widget.historyPreview)
+                SelectableText(
+                  _titleController.text.trim().isEmpty
+                      ? '无标题笔记'
+                      : _titleController.text,
+                  style: theme.textTheme.headlineMedium?.copyWith(
+                    color: _titleController.text.trim().isEmpty
+                        ? theme.colorScheme.onSurfaceVariant
+                        : null,
+                    fontWeight: FontWeight.w700,
+                    height: 1.25,
+                  ),
+                )
+              else
+                TextField(
+                  controller: _titleController,
+                  readOnly: widget.readOnly,
+                  onChanged: widget.readOnly ? null : (_) => _scheduleSave(),
+                  maxLength: 20,
+                  maxLines: null,
+                  decoration: const InputDecoration(
+                    hintText: '无标题笔记',
+                    counterText: '',
+                    filled: false,
+                    border: InputBorder.none,
+                    enabledBorder: InputBorder.none,
+                    focusedBorder: InputBorder.none,
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                  style: theme.textTheme.headlineMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    height: 1.25,
+                  ),
                 ),
-                style: theme.textTheme.headlineMedium?.copyWith(
-                  fontWeight: FontWeight.w700,
-                  height: 1.25,
-                ),
-              ),
               if (_tags.isNotEmpty) ...[
                 const SizedBox(height: 14),
                 Wrap(
@@ -794,7 +844,9 @@ class _NoteEditorScreenState extends State<NoteEditorScreen>
           icon: const Icon(Icons.arrow_back_rounded),
         ),
         title: Text(
-          widget.readOnly
+          widget.historyPreview
+              ? '历史的今天'
+              : widget.readOnly
               ? '只读预览'
               : (_markdownPreview ? 'Markdown 预览' : _saveLabel),
           style: theme.textTheme.labelLarge?.copyWith(
@@ -824,7 +876,8 @@ class _NoteEditorScreenState extends State<NoteEditorScreen>
                 _favorite ? Icons.star_rounded : Icons.star_outline_rounded,
               ),
             ),
-          _ShareExportMenu(onSelected: _handleShareExportAction),
+          if (!widget.historyPreview)
+            _ShareExportMenu(onSelected: _handleShareExportAction),
           if (!widget.readOnly && _persisted)
             IconButton(
               tooltip: '删除',

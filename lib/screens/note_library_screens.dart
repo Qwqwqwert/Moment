@@ -654,7 +654,11 @@ class _TrashScreenState extends State<TrashScreen> {
                         context,
                         MaterialPageRoute(
                           builder: (_) =>
-                              NoteEditorScreen(noteId: note.id, readOnly: true),
+                              NoteEditorScreen(
+                                noteId: note.id,
+                                readOnly: true,
+                                deleted: true,
+                              ),
                         ),
                       );
                     }
@@ -747,6 +751,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _loaded = false;
   bool _saving = false;
   bool _testing = false;
+  bool _updatingCreatedAt = false;
   bool _showKey = false;
 
   @override
@@ -886,6 +891,141 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
+  Future<void> _changeNoteCreatedAt() async {
+    final app = AppScope.read(context);
+    if (app.notes.isEmpty) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('当前没有可修改的笔记')));
+      return;
+    }
+
+    final note = await showModalBottomSheet<Note>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: SizedBox(
+          height: MediaQuery.sizeOf(context).height * .68,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(24, 0, 24, 12),
+                child: Text(
+                  '选择笔记',
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
+              ),
+              const Divider(height: 1),
+              Expanded(
+                child: ListView.separated(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  itemCount: app.notes.length,
+                  separatorBuilder: (_, _) => const Divider(height: 1),
+                  itemBuilder: (context, index) {
+                    final candidate = app.notes[index];
+                    return ListTile(
+                      leading: const Icon(Icons.note_outlined),
+                      title: Text(
+                        _noteDisplayTitle(candidate),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      subtitle: Text(
+                        '创建于 ${_formatDateTime(candidate.createdAt)}',
+                      ),
+                      onTap: () => Navigator.pop(context, candidate),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (!mounted || note == null) return;
+
+    final date = await showDatePicker(
+      context: context,
+      initialDate: note.createdAt,
+      firstDate: DateTime(1900),
+      lastDate: DateTime(2200),
+      helpText: '选择创建日期',
+    );
+    if (!mounted || date == null) return;
+    final time = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(note.createdAt),
+      helpText: '选择创建时间',
+    );
+    if (!mounted || time == null) return;
+
+    final createdAt = DateTime(
+      date.year,
+      date.month,
+      date.day,
+      time.hour,
+      time.minute,
+    );
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('确认修改创建时间？'),
+        content: Text(
+          '“${_noteDisplayTitle(note)}”\n\n'
+          '${_formatDateTime(note.createdAt)}\n'
+          '改为\n'
+          '${_formatDateTime(createdAt)}\n\n'
+          '最新修改时间不会改变。',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('确认修改'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted || confirmed != true) return;
+
+    setState(() => _updatingCreatedAt = true);
+    try {
+      await app.save(note.copyWith(createdAt: createdAt));
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('笔记创建时间已修改')));
+      }
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('修改失败：$error')));
+      }
+    } finally {
+      if (mounted) setState(() => _updatingCreatedAt = false);
+    }
+  }
+
+  String _noteDisplayTitle(Note note) {
+    final title = note.title.trim();
+    if (title.isNotEmpty) return title;
+    final content = note.content.trim();
+    if (content.isEmpty) return '无标题笔记';
+    return content.split(RegExp(r'\r?\n')).first.trim();
+  }
+
+  String _formatDateTime(DateTime value) {
+    final month = value.month.toString().padLeft(2, '0');
+    final day = value.day.toString().padLeft(2, '0');
+    final hour = value.hour.toString().padLeft(2, '0');
+    final minute = value.minute.toString().padLeft(2, '0');
+    return '${value.year}-$month-$day $hour:$minute';
+  }
+
   @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(title: const Text('设置')),
@@ -897,6 +1037,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
             leading: Icon(Icons.info_outline),
             title: Text('关于 Moment'),
             subtitle: Text('Flutter 笔记版 · 支持 Markdown 预览'),
+          ),
+        ),
+        const SizedBox(height: 12),
+        Card(
+          child: ListTile(
+            leading: const Icon(Icons.edit_calendar_outlined),
+            title: const Text('修改笔记创建时间'),
+            subtitle: const Text('临时测试工具 · 不会改变最新修改时间'),
+            trailing: _updatingCreatedAt
+                ? const SizedBox.square(
+                    dimension: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.chevron_right_rounded),
+            onTap: _updatingCreatedAt ? null : _changeNoteCreatedAt,
           ),
         ),
         const SizedBox(height: 12),
