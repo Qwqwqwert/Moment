@@ -40,8 +40,10 @@ dependencies:
   image_picker: ^1.2.0
   http: ^1.6.0
   just_audio: ^0.10.6
+  just_audio_media_kit: ^2.1.0
   just_audio_windows: ^0.2.3
   markdown: ^7.3.1
+  media_kit_libs_linux: ^1.2.1
   path: ^1.9.1
   path_provider: ^2.1.5
   photo_view: ^0.15.0
@@ -52,6 +54,7 @@ dependencies:
   timezone: ^0.11.1
   url_launcher: ^6.3.2
   video_player: ^2.14.0
+  video_player_media_kit: ^2.0.0
   video_player_win: ^3.2.2
   window_manager: ^0.5.2
   windows_single_instance: ^1.2.0

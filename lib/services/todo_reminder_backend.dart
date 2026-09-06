@@ -3,7 +3,7 @@ import '../models/todo.dart';
 
 abstract interface class TodoReminderBackend {
   Future<void> initialize();
-  void bindDeliveryRepository(WindowsReminderDeliveryRepository? repository);
+  void bindDeliveryRepository(RuntimeReminderDeliveryRepository? repository);
   Future<bool> requestPermission();
   Future<bool> requestNotificationPermission();
   Future<void> syncReminders(Iterable<Todo> todos);

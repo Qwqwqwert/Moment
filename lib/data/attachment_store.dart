@@ -5,6 +5,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:path/path.dart' as p;
 
 import '../services/platform_storage.dart';
+import '../services/moment_platform.dart';
 
 class AttachmentStore {
   AttachmentStore({ImagePicker? picker, this.rootDirectory})
@@ -17,13 +18,17 @@ class AttachmentStore {
       rootDirectory ?? await momentDataDirectory();
 
   Future<List<String>> pickAndStore(String noteId) async {
+    if (MomentPlatform.isDesktop) {
+      final files = await FilePicker.pickFiles(type: FileType.image);
+      return _storeFiles(noteId, 'images', files.map((file) => file.xFile));
+    }
     final picked = await _picker.pickMultiImage();
     return _storeFiles(noteId, 'images', picked);
   }
 
   Future<String?> pickVideoAndStore(String noteId) async {
     final XFile? picked;
-    if (Platform.isWindows) {
+    if (MomentPlatform.isDesktop) {
       final result = await FilePicker.pickFile(type: FileType.video);
       picked = result?.xFile;
     } else {
@@ -59,7 +64,7 @@ class AttachmentStore {
   }
 
   Future<RecoveredAttachments> recoverLost(String noteId) async {
-    if (!Platform.isAndroid) return const RecoveredAttachments();
+    if (!MomentPlatform.isAndroid) return const RecoveredAttachments();
     final response = await _picker.retrieveLostData();
     final files = response.files ?? [if (response.file != null) response.file!];
     if (response.isEmpty || files.isEmpty) {

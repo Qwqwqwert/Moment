@@ -17,6 +17,8 @@ import 'package:video_player/video_player.dart';
 
 import '../models/note.dart';
 import '../services/ai_service.dart';
+import '../services/linux_system_service.dart';
+import '../services/moment_platform.dart';
 import '../state/app_controller.dart';
 import '../theme/desktop_environment.dart';
 import '../utils/tag_name.dart';
@@ -543,6 +545,16 @@ class _NoteEditorScreenState extends State<NoteEditorScreen>
   Future<void> _recordVoice() async {
     final recorder = AudioRecorder();
     try {
+      if (MomentPlatform.isLinux) {
+        final missing = await LinuxSystemService.missingRecordingDependencies();
+        if (missing.isNotEmpty) {
+          _showActionMessage(
+            'Linux 录音需要先安装 ffmpeg 和 pulseaudio-utils。\n'
+            '请运行：sudo apt install ffmpeg pulseaudio-utils',
+          );
+          return;
+        }
+      }
       final allowed = await recorder.hasPermission();
       if (!mounted) return;
       if (!allowed) {
@@ -576,7 +588,11 @@ class _NoteEditorScreenState extends State<NoteEditorScreen>
       await _save();
     } catch (error) {
       _showActionMessage(
-        _desktop ? '录制语音失败，请检查 Windows 设置中的麦克风隐私权限：$error' : '录制语音失败：$error',
+        MomentPlatform.isLinux
+            ? '录制语音失败，请检查 Linux 麦克风设置：$error'
+            : _desktop
+            ? '录制语音失败，请检查 Windows 设置中的麦克风隐私权限：$error'
+            : '录制语音失败：$error',
       );
     } finally {
       await recorder.dispose();

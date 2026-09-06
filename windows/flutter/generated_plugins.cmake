@@ -7,6 +7,7 @@ list(APPEND FLUTTER_PLUGIN_LIST
   flutter_secure_storage_windows
   flutter_timezone
   just_audio_windows
+  media_kit_video
   record_windows
   screen_retriever_windows
   share_plus

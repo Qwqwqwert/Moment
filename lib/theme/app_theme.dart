@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-ThemeData buildMomentTheme({bool desktop = false}) {
+ThemeData buildMomentTheme({bool desktop = false, bool linux = false}) {
   final scheme = ColorScheme.fromSeed(
     seedColor: const Color(0xFF4267D6),
     brightness: Brightness.light,
@@ -11,12 +11,14 @@ ThemeData buildMomentTheme({bool desktop = false}) {
     colorScheme: scheme,
     scaffoldBackgroundColor: const Color(0xFFF7F8FC),
     fontFamilyFallback: desktop
-        ? const [
-            'Segoe UI',
-            'Microsoft YaHei UI',
-            'Microsoft YaHei',
-            'sans-serif',
-          ]
+        ? linux
+              ? const ['Noto Sans', 'Noto Sans CJK SC', 'sans-serif']
+              : const [
+                  'Segoe UI',
+                  'Microsoft YaHei UI',
+                  'Microsoft YaHei',
+                  'sans-serif',
+                ]
         : const ['Noto Sans SC', 'Microsoft YaHei', 'sans-serif'],
     visualDensity: desktop
         ? const VisualDensity(horizontal: -1, vertical: -1)

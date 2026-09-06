@@ -1,30 +1,56 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:path/path.dart' as p;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:windows_single_instance/windows_single_instance.dart';
+import 'package:just_audio_media_kit/just_audio_media_kit.dart';
+import 'package:video_player_media_kit/video_player_media_kit.dart';
 
 import 'data/attachment_store.dart';
 import 'data/note_repository.dart';
 import 'screens/home_shell.dart';
 import 'services/todo_reminder_service.dart';
 import 'services/platform_storage.dart';
+import 'services/moment_platform.dart';
 import 'state/app_controller.dart';
 import 'theme/app_theme.dart';
 
 Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
+  if (MomentPlatform.isLinux) {
+    VideoPlayerMediaKit.ensureInitialized(linux: true);
+    JustAudioMediaKit.ensureInitialized(
+      linux: true,
+      windows: false,
+      android: false,
+      iOS: false,
+      macOS: false,
+    );
+  }
   SqliteNoteRepository repository;
   AttachmentStore attachmentStore;
-  if (Platform.isWindows) {
+  if (MomentPlatform.isWindows) {
     await WindowsSingleInstance.ensureSingleInstance(
       args,
       'moment_desktop_single_instance',
     );
+    sqfliteFfiInit();
+    final dataDirectory = await momentDataDirectory();
+    await dataDirectory.create(recursive: true);
+    repository = SqliteNoteRepository(
+      databaseFactoryOverride: databaseFactoryFfi,
+      databasePath: p.join(dataDirectory.path, 'moment.sqlite'),
+    );
+    attachmentStore = AttachmentStore(rootDirectory: dataDirectory);
+    await windowManager.ensureInitialized();
+    await windowManager.setMinimumSize(const Size(900, 600));
+    await windowManager.setSize(const Size(1200, 760));
+    await windowManager.center();
+    await windowManager.setTitle('Moment');
+    await windowManager.setPreventClose(true);
+  } else if (MomentPlatform.isLinux) {
     sqfliteFfiInit();
     final dataDirectory = await momentDataDirectory();
     await dataDirectory.create(recursive: true);
@@ -82,12 +108,14 @@ class _MomentAppState extends State<MomentApp> with WindowListener {
       attachmentStore: widget.attachmentStore ?? AttachmentStore(),
       todoReminderService: widget.todoReminderService,
     )..initialize();
-    if (Platform.isWindows) windowManager.addListener(this);
+    if (MomentPlatform.isDesktop) windowManager.addListener(this);
   }
 
   @override
   void dispose() {
-    if (Platform.isWindows) windowManager.removeListener(this);
+    if (MomentPlatform.isDesktop) {
+      windowManager.removeListener(this);
+    }
     controller.dispose();
     super.dispose();
   }
@@ -118,7 +146,8 @@ class _MomentAppState extends State<MomentApp> with WindowListener {
         title: 'Moment',
         debugShowCheckedModeBanner: false,
         theme: buildMomentTheme(
-          desktop: defaultTargetPlatform == TargetPlatform.windows,
+          desktop: MomentPlatform.isDesktop,
+          linux: MomentPlatform.isLinux,
         ),
         builder: (context, child) => Actions(
           actions: {

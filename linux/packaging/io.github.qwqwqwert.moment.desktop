@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Moment
+Comment=Notes and todos in one focused workspace
+Exec=moment
+Icon=io.github.qwqwqwert.moment
+Terminal=false
+Categories=Office;Utility;
+StartupNotify=true
+StartupWMClass=io.github.qwqwqwert.moment

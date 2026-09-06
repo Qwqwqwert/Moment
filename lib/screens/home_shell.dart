@@ -1,13 +1,13 @@
 import 'dart:math';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/services.dart';
 
 import '../models/achievement.dart';
 import '../models/note.dart';
 import '../state/app_controller.dart';
 import '../theme/desktop_environment.dart';
+import '../services/moment_platform.dart';
 import '../widgets/note_card.dart';
 import 'note_editor_screen.dart';
 import 'note_library_screens.dart';
@@ -23,7 +23,7 @@ class HomeShell extends StatefulWidget {
 
 class _HomeShellState extends State<HomeShell>
     with SingleTickerProviderStateMixin {
-  static const _historyTodayChancePercent = 100;
+  static const _historyTodayChancePercent = 6;
   static const _pageTransitionDuration = Duration(milliseconds: 220);
 
   var _index = 0;
@@ -142,7 +142,7 @@ class _HomeShellState extends State<HomeShell>
 
   @override
   Widget build(BuildContext context) {
-    if (defaultTargetPlatform == TargetPlatform.windows) {
+    if (MomentPlatform.isDesktop) {
       return const _DesktopHomeShell();
     }
     return DesktopEnvironment.mobile(

@@ -32,7 +32,7 @@ class SqliteNoteRepository
         NoteRepository,
         TodoRepository,
         AchievementRepository,
-        WindowsReminderDeliveryRepository {
+        RuntimeReminderDeliveryRepository {
   SqliteNoteRepository({this.databaseFactoryOverride, this.databasePath});
 
   final ffi.DatabaseFactory? databaseFactoryOverride;
@@ -732,10 +732,7 @@ class SqliteNoteRepository
   }
 
   @override
-  Future<bool> wasWindowsReminderDelivered(
-    String todoId,
-    DateTime dueAt,
-  ) async {
+  Future<bool> wasReminderDelivered(String todoId, DateTime dueAt) async {
     final rows = await _db.query(
       'windows_reminder_deliveries',
       columns: ['todo_id'],
@@ -746,20 +743,35 @@ class SqliteNoteRepository
     return rows.isNotEmpty;
   }
 
+  @Deprecated('Use wasReminderDelivered instead')
   @override
-  Future<void> markWindowsReminderDelivered(String todoId, DateTime dueAt) =>
+  Future<bool> wasWindowsReminderDelivered(String todoId, DateTime dueAt) =>
+      wasReminderDelivered(todoId, dueAt);
+
+  @override
+  Future<void> markReminderDelivered(String todoId, DateTime dueAt) =>
       _db.insert('windows_reminder_deliveries', {
         'todo_id': todoId,
         'due_at': dueAt.millisecondsSinceEpoch,
         'delivered_at': DateTime.now().millisecondsSinceEpoch,
       }, conflictAlgorithm: ConflictAlgorithm.ignore);
 
+  @Deprecated('Use markReminderDelivered instead')
   @override
-  Future<void> pruneWindowsReminderDeliveries(DateTime before) => _db.delete(
+  Future<void> markWindowsReminderDelivered(String todoId, DateTime dueAt) =>
+      markReminderDelivered(todoId, dueAt);
+
+  @override
+  Future<void> pruneReminderDeliveries(DateTime before) => _db.delete(
     'windows_reminder_deliveries',
     where: 'delivered_at < ?',
     whereArgs: [before.millisecondsSinceEpoch],
   );
+
+  @Deprecated('Use pruneReminderDeliveries instead')
+  @override
+  Future<void> pruneWindowsReminderDeliveries(DateTime before) =>
+      pruneReminderDeliveries(before);
 
   @override
   Future<void> close() async {

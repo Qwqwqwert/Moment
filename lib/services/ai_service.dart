@@ -4,6 +4,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 
 import '../models/note.dart';
+import 'moment_platform.dart';
 
 class AiConfig {
   const AiConfig({this.baseUrl = '', this.model = '', this.apiKey = ''});
@@ -45,9 +46,19 @@ class AiSettingsStore {
   }
 
   Future<void> save(AiConfig config) async {
-    await _storage.write(key: _baseUrlKey, value: config.baseUrl.trim());
-    await _storage.write(key: _modelKey, value: config.model.trim());
-    await _storage.write(key: _apiKeyKey, value: config.apiKey.trim());
+    try {
+      await _storage.write(key: _baseUrlKey, value: config.baseUrl.trim());
+      await _storage.write(key: _modelKey, value: config.model.trim());
+      await _storage.write(key: _apiKeyKey, value: config.apiKey.trim());
+    } catch (error) {
+      if (MomentPlatform.isLinux) {
+        throw StateError(
+          'Linux 密钥环不可用，无法安全保存 API Key。请启用 GNOME Keyring/KWallet '
+          '后重试；Moment 不会使用明文保存。($error)',
+        );
+      }
+      rethrow;
+    }
   }
 }
 

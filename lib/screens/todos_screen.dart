@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -8,6 +7,7 @@ import '../models/note.dart';
 import '../models/todo.dart';
 import '../state/app_controller.dart';
 import '../theme/desktop_environment.dart';
+import '../services/moment_platform.dart';
 import 'note_library_screens.dart';
 
 class TodosScreen extends StatefulWidget {
@@ -1402,7 +1402,9 @@ class _TodoEditorScreenState extends State<TodoEditorScreen> {
   bool _repeatScheduleChanged = false;
   bool _testingReminder = false;
 
-  bool get _isWindows => Platform.isWindows;
+  bool get _isWindows => MomentPlatform.isWindows;
+  bool get _isLinux => MomentPlatform.isLinux;
+  bool get _isRuntimeDesktop => _isWindows || _isLinux;
 
   String? get _repeatHint => switch (_repeat) {
     TodoRepeat.weekly => '将于每${_weekdayLabel(_dueAt.weekday)}重复',
@@ -1492,7 +1494,11 @@ class _TodoEditorScreenState extends State<TodoEditorScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            _isWindows ? 'Windows 通知当前不可用，请检查系统通知设置' : '需要通知、精确闹钟和全屏提醒权限才能开启提醒',
+            _isLinux
+                ? 'Linux 通知当前不可用，请检查 Ubuntu 通知设置'
+                : _isWindows
+                ? 'Windows 通知当前不可用，请检查系统通知设置'
+                : '需要通知、精确闹钟和全屏提醒权限才能开启提醒',
           ),
         ),
       );
@@ -1519,7 +1525,9 @@ class _TodoEditorScreenState extends State<TodoEditorScreen> {
       SnackBar(
         content: Text(
           shown
-              ? (_isWindows
+              ? (_isLinux
+                    ? '测试提醒已发送，请检查 Ubuntu 通知和勿扰模式'
+                    : _isWindows
                     ? '测试提醒已发送，请检查 Windows 通知和勿扰模式'
                     : '测试提醒已发送，请检查通知栏、弹窗、声音和振动')
               : '请先允许 Moment 发送通知',
@@ -1556,7 +1564,11 @@ class _TodoEditorScreenState extends State<TodoEditorScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              _isWindows ? '请先在 Windows 中允许 Moment 通知' : '请授予全屏提醒权限后再保存',
+              _isLinux
+                  ? '请先在 Ubuntu 通知设置中允许 Moment'
+                  : _isWindows
+                  ? '请先在 Windows 中允许 Moment 通知'
+                  : '请授予全屏提醒权限后再保存',
             ),
           ),
         );
@@ -1700,7 +1712,9 @@ class _TodoEditorScreenState extends State<TodoEditorScreen> {
             secondary: const Icon(Icons.notifications_active_outlined),
             title: const Text('提醒'),
             subtitle: Text(
-              _isWindows ? '仅在 Moment 运行或最小化时弹出通知；退出后不会提醒' : '在截止时间弹出系统通知',
+              _isRuntimeDesktop
+                  ? '仅在 Moment 运行或最小化时弹出通知；退出后不会提醒'
+                  : '在截止时间弹出系统通知',
             ),
             value: _reminderEnabled,
             onChanged: _setReminder,
@@ -1716,7 +1730,9 @@ class _TodoEditorScreenState extends State<TodoEditorScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  _isWindows
+                  _isLinux
+                      ? '请在 Ubuntu“设置 > 通知”中允许 Moment，并检查勿扰模式。录音依赖请按提示安装。退出 Moment 后不会提醒。'
+                      : _isWindows
                       ? '请在 Windows“通知”设置中允许 Moment，并检查勿扰模式。语音录制权限位于“隐私和安全性 > 麦克风”。退出 Moment 后不会提醒。'
                       : '部分安卓手机需要在应用的“通知权限”中自行开启横幅、锁屏、铃声和振动，否则提醒可能只显示在通知栏。',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
@@ -1731,7 +1747,13 @@ class _TodoEditorScreenState extends State<TodoEditorScreen> {
                     TextButton.icon(
                       onPressed: _openReminderSettings,
                       icon: const Icon(Icons.open_in_new_rounded, size: 18),
-                      label: Text(_isWindows ? '打开 Windows 通知设置' : '打开通知权限'),
+                      label: Text(
+                        _isLinux
+                            ? '打开 Ubuntu 通知设置'
+                            : _isWindows
+                            ? '打开 Windows 通知设置'
+                            : '打开通知权限',
+                      ),
                     ),
                     OutlinedButton.icon(
                       onPressed: _testingReminder ? null : _testReminder,

@@ -60,7 +60,7 @@ class AndroidTodoReminderBackend implements TodoReminderBackend {
   }
 
   @override
-  void bindDeliveryRepository(WindowsReminderDeliveryRepository? repository) {}
+  void bindDeliveryRepository(RuntimeReminderDeliveryRepository? repository) {}
 
   @override
   Future<bool> requestPermission() async {

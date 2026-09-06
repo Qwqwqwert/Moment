@@ -26,7 +26,7 @@ class WindowsTodoReminderBackend implements TodoReminderBackend {
 
   final _notifications = FlutterLocalNotificationsPlugin();
   final Map<String, Timer> _timers = {};
-  WindowsReminderDeliveryRepository? _deliveries;
+  RuntimeReminderDeliveryRepository? _deliveries;
   bool _initialized = false;
   int _generation = 0;
 
@@ -43,7 +43,7 @@ class WindowsTodoReminderBackend implements TodoReminderBackend {
   }
 
   @override
-  void bindDeliveryRepository(WindowsReminderDeliveryRepository? repository) {
+  void bindDeliveryRepository(RuntimeReminderDeliveryRepository? repository) {
     _deliveries = repository;
   }
 
@@ -63,7 +63,7 @@ class WindowsTodoReminderBackend implements TodoReminderBackend {
     if (!_initialized) return;
 
     final now = DateTime.now();
-    await _deliveries?.pruneWindowsReminderDeliveries(
+    await _deliveries?.pruneReminderDeliveries(
       now.subtract(const Duration(days: 32)),
     );
     for (final todo in todos) {
@@ -85,8 +85,7 @@ class WindowsTodoReminderBackend implements TodoReminderBackend {
 
   Future<void> _deliver(Todo todo, int generation) async {
     if (!_initialized || generation != _generation) return;
-    if (await _deliveries?.wasWindowsReminderDelivered(todo.id, todo.dueAt) ==
-        true) {
+    if (await _deliveries?.wasReminderDelivered(todo.id, todo.dueAt) == true) {
       return;
     }
     try {
@@ -97,7 +96,7 @@ class WindowsTodoReminderBackend implements TodoReminderBackend {
         notificationDetails: _details,
         payload: 'todo:${todo.id}',
       );
-      await _deliveries?.markWindowsReminderDelivered(todo.id, todo.dueAt);
+      await _deliveries?.markReminderDelivered(todo.id, todo.dueAt);
     } catch (_) {}
   }
 
