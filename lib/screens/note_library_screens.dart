@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../models/achievement.dart';
 import '../models/note.dart';
 import '../services/ai_service.dart';
 import '../state/app_controller.dart';
@@ -653,12 +654,11 @@ class _TrashScreenState extends State<TrashScreen> {
                       Navigator.push<void>(
                         context,
                         MaterialPageRoute(
-                          builder: (_) =>
-                              NoteEditorScreen(
-                                noteId: note.id,
-                                readOnly: true,
-                                deleted: true,
-                              ),
+                          builder: (_) => NoteEditorScreen(
+                            noteId: note.id,
+                            readOnly: true,
+                            deleted: true,
+                          ),
                         ),
                       );
                     }
@@ -1040,6 +1040,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
         ),
         const SizedBox(height: 12),
+        if (AppScope.of(context).achievements.isNotEmpty) ...[
+          Card(
+            child: ListTile(
+              leading: const Icon(Icons.emoji_events_outlined),
+              title: const Text('成就'),
+              subtitle: Text(
+                '已获得 ${AppScope.of(context).achievements.length} 项成就',
+              ),
+              trailing: const Icon(Icons.chevron_right_rounded),
+              onTap: () => Navigator.push<void>(
+                context,
+                MaterialPageRoute(builder: (_) => const AchievementsScreen()),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+        ],
         Card(
           child: ListTile(
             leading: const Icon(Icons.edit_calendar_outlined),
@@ -1130,4 +1147,213 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ],
     ),
   );
+}
+
+class AchievementsScreen extends StatelessWidget {
+  const AchievementsScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final achievements = AppScope.of(context).achievements;
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+    return Scaffold(
+      appBar: AppBar(title: const Text('成就')),
+      body: CustomScrollView(
+        slivers: [
+          SliverToBoxAdapter(
+            child: Container(
+              padding: const EdgeInsets.fromLTRB(24, 18, 24, 32),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    colors.primaryContainer.withValues(alpha: .65),
+                    colors.surface.withValues(alpha: 0),
+                  ],
+                ),
+              ),
+              child: Column(
+                children: [
+                  Container(
+                    width: 78,
+                    height: 78,
+                    decoration: BoxDecoration(
+                      color: colors.primary,
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: colors.primary.withValues(alpha: .24),
+                          blurRadius: 24,
+                          offset: const Offset(0, 10),
+                        ),
+                      ],
+                    ),
+                    child: Icon(
+                      Icons.emoji_events_rounded,
+                      color: colors.onPrimary,
+                      size: 40,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    '已获得 ${achievements.length} 项成就',
+                    style: theme.textTheme.headlineSmall?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    '每一次记录与完成，都在构成你的时间轨迹',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: colors.onSurfaceVariant,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+              ),
+            ),
+          ),
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(20, 4, 20, 36),
+            sliver: SliverList.builder(
+              itemCount: achievements.length,
+              itemBuilder: (context, index) => _AchievementTimelineItem(
+                achievement: achievements[index],
+                isLast: index == achievements.length - 1,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AchievementTimelineItem extends StatelessWidget {
+  const _AchievementTimelineItem({
+    required this.achievement,
+    required this.isLast,
+  });
+
+  final Achievement achievement;
+  final bool isLast;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = Theme.of(context).colorScheme;
+    final notesAchievement = achievement.kind == AchievementKind.notesCreated;
+    final accent = notesAchievement ? colors.primary : colors.tertiary;
+    return IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          SizedBox(
+            width: 56,
+            child: Column(
+              children: [
+                Container(
+                  width: 48,
+                  height: 48,
+                  decoration: BoxDecoration(
+                    color: accent.withValues(alpha: .14),
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: accent.withValues(alpha: .32),
+                      width: 1.5,
+                    ),
+                  ),
+                  child: Icon(
+                    notesAchievement
+                        ? Icons.auto_stories_rounded
+                        : Icons.task_alt_rounded,
+                    color: accent,
+                    size: 25,
+                  ),
+                ),
+                if (!isLast)
+                  Expanded(
+                    child: Container(
+                      width: 2,
+                      margin: const EdgeInsets.symmetric(vertical: 7),
+                      color: colors.outlineVariant.withValues(alpha: .7),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.only(bottom: 30),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    notesAchievement ? '笔记里程碑' : '待办里程碑',
+                    style: theme.textTheme.labelMedium?.copyWith(
+                      color: accent,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: .5,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Expanded(
+                        child: Text(
+                          achievement.title,
+                          style: theme.textTheme.titleLarge?.copyWith(
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                      Text(
+                        '${achievement.milestone}',
+                        style: theme.textTheme.headlineSmall?.copyWith(
+                          color: accent,
+                          fontWeight: FontWeight.w900,
+                          height: 1,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 7),
+                  Text(
+                    achievement.description,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: colors.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(height: 7),
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.calendar_today_outlined,
+                        size: 14,
+                        color: colors.outline,
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        _formatAchievementDate(achievement.unlockedAt),
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: colors.outline,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _formatAchievementDate(DateTime value) =>
+      '${value.year}年${value.month}月${value.day}日';
 }

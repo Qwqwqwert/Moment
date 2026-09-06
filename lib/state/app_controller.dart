@@ -3,8 +3,10 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../data/attachment_store.dart';
+import '../data/achievement_repository.dart';
 import '../data/note_repository.dart';
 import '../data/todo_repository.dart';
+import '../models/achievement.dart';
 import '../models/note.dart';
 import '../models/todo.dart';
 import '../services/ai_service.dart';
@@ -32,7 +34,9 @@ class AppController extends ChangeNotifier {
   List<Todo> todos = const [];
   List<Todo> trashedTodos = const [];
   List<String> tags = const [];
+  List<Achievement> achievements = const [];
   AiConfig aiConfig = const AiConfig();
+  final List<Achievement> _pendingAchievements = [];
 
   Future<void> initialize() async {
     try {
@@ -59,6 +63,7 @@ class AppController extends ChangeNotifier {
     trashedTodos = await todoRepository?.getTodos(deleted: true) ?? const [];
     await todoReminderService?.syncReminders(todos);
     tags = await repository.getTags();
+    achievements = await _achievementRepository?.getAchievements() ?? const [];
     loading = false;
     notifyListeners();
   }
@@ -82,6 +87,11 @@ class AppController extends ChangeNotifier {
   TodoRepository? get _todos =>
       repository is TodoRepository ? repository as TodoRepository : null;
 
+  AchievementRepository? get _achievementRepository =>
+      repository is AchievementRepository
+      ? repository as AchievementRepository
+      : null;
+
   Future<bool> requestTodoReminderPermission() async =>
       await todoReminderService?.requestPermission() ?? false;
 
@@ -104,8 +114,16 @@ class AppController extends ChangeNotifier {
     bool completed, {
     DateTime? nextDueAt,
   }) async {
+    final source = findTodo(id) ?? findTodo(id, deleted: true);
     await _todos?.setTodoCompleted(id, completed, nextDueAt: nextDueAt);
-    if (completed) await todoReminderService?.cancel(id);
+    if (completed) {
+      await todoReminderService?.cancel(id);
+      if (source != null && !source.isCompleted) {
+        await _registerAchievement(
+          _achievementRepository?.recordTodoCompleted(id),
+        );
+      }
+    }
   }
 
   Future<void> trashTodos(Iterable<String> ids) async {
@@ -127,7 +145,18 @@ class AppController extends ChangeNotifier {
     }
   }
 
-  Future<void> save(Note note) => repository.saveNote(note);
+  Future<void> save(Note note, {bool? isNew}) async {
+    final shouldCountAsNew =
+        isNew ??
+        (findNote(note.id) == null && findNote(note.id, deleted: true) == null);
+    await repository.saveNote(note);
+    if (shouldCountAsNew) {
+      await _registerAchievement(
+        _achievementRepository?.recordNoteCreated(note.id),
+      );
+    }
+  }
+
   Future<void> trash(Iterable<String> ids) => repository.moveToTrash(ids);
   Future<void> restore(Iterable<String> ids) => repository.restore(ids);
 
@@ -149,6 +178,21 @@ class AppController extends ChangeNotifier {
     );
     await aiSettingsStore.save(normalized);
     aiConfig = normalized;
+    notifyListeners();
+  }
+
+  Achievement? takePendingAchievement() =>
+      _pendingAchievements.isEmpty ? null : _pendingAchievements.removeAt(0);
+
+  Future<void> _registerAchievement(
+    Future<Achievement?>? achievementFuture,
+  ) async {
+    final achievement = await achievementFuture;
+    if (achievement == null) return;
+    achievements =
+        await _achievementRepository?.getAchievements() ??
+        [achievement, ...achievements];
+    _pendingAchievements.add(achievement);
     notifyListeners();
   }
 

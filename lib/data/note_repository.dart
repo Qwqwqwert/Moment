@@ -5,6 +5,8 @@ import 'package:sqflite/sqflite.dart';
 
 import '../models/note.dart';
 import '../models/todo.dart';
+import '../models/achievement.dart';
+import 'achievement_repository.dart';
 import 'todo_repository.dart';
 
 abstract interface class NoteRepository {
@@ -23,7 +25,8 @@ abstract interface class NoteRepository {
   Future<void> close();
 }
 
-class SqliteNoteRepository implements NoteRepository, TodoRepository {
+class SqliteNoteRepository
+    implements NoteRepository, TodoRepository, AchievementRepository {
   Database? _database;
   final _changes = StreamController<void>.broadcast();
 
@@ -37,7 +40,7 @@ class SqliteNoteRepository implements NoteRepository, TodoRepository {
     final root = await getDatabasesPath();
     _database = await openDatabase(
       p.join(root, 'moment.sqlite'),
-      version: 7,
+      version: 8,
       onConfigure: (db) => db.execute('PRAGMA foreign_keys = ON'),
       onCreate: (db, version) async {
         await db.execute('''
@@ -87,6 +90,7 @@ class SqliteNoteRepository implements NoteRepository, TodoRepository {
           )
         ''');
         await _createTodosTable(db);
+        await _createAchievementTables(db, seedExisting: false);
         for (final tag in const ['工作', '学习', '生活', '重要', '随笔']) {
           await db.insert('tags', {'name': tag});
         }
@@ -133,8 +137,93 @@ class SqliteNoteRepository implements NoteRepository, TodoRepository {
             )
           ''');
         }
+        if (oldVersion < 8) {
+          await _createAchievementTables(db, seedExisting: true);
+        }
       },
     );
+  }
+
+  static const _achievementMilestones = [10, 100, 250, 1000];
+
+  Future<void> _createAchievementTables(
+    DatabaseExecutor db, {
+    required bool seedExisting,
+  }) async {
+    await db.execute('''
+      CREATE TABLE achievements (
+        id TEXT PRIMARY KEY,
+        kind TEXT NOT NULL,
+        milestone INTEGER NOT NULL,
+        unlocked_at INTEGER NOT NULL
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE achievement_progress (
+        kind TEXT PRIMARY KEY,
+        count INTEGER NOT NULL
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE achievement_counted_notes (
+        note_id TEXT PRIMARY KEY
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE achievement_counted_todos (
+        todo_id TEXT PRIMARY KEY
+      )
+    ''');
+
+    var noteCount = 0;
+    var todoCount = 0;
+    if (seedExisting) {
+      await db.execute(
+        'INSERT INTO achievement_counted_notes(note_id) SELECT id FROM notes',
+      );
+      await db.execute(
+        'INSERT INTO achievement_counted_todos(todo_id) '
+        'SELECT id FROM todos WHERE completed = 1',
+      );
+      noteCount =
+          Sqflite.firstIntValue(
+            await db.rawQuery('SELECT COUNT(*) FROM achievement_counted_notes'),
+          ) ??
+          0;
+      todoCount =
+          Sqflite.firstIntValue(
+            await db.rawQuery('SELECT COUNT(*) FROM achievement_counted_todos'),
+          ) ??
+          0;
+    }
+    await db.insert('achievement_progress', {
+      'kind': AchievementKind.notesCreated.name,
+      'count': noteCount,
+    });
+    await db.insert('achievement_progress', {
+      'kind': AchievementKind.todosCompleted.name,
+      'count': todoCount,
+    });
+
+    final now = DateTime.now().millisecondsSinceEpoch;
+    for (final milestone in _achievementMilestones) {
+      if (noteCount >= milestone) {
+        await _insertAchievement(
+          db,
+          AchievementKind.notesCreated,
+          milestone,
+          now,
+        );
+      }
+      if (todoCount >= milestone) {
+        await _insertAchievement(
+          db,
+          AchievementKind.todosCompleted,
+          milestone,
+          now,
+        );
+      }
+    }
   }
 
   Future<void> _createTodosTable(DatabaseExecutor db) async {
@@ -159,6 +248,99 @@ class SqliteNoteRepository implements NoteRepository, TodoRepository {
       'CREATE INDEX todos_state_due ON todos(deleted_at, completed, due_at)',
     );
   }
+
+  @override
+  Future<List<Achievement>> getAchievements() async {
+    final rows = await _db.query('achievements', orderBy: 'unlocked_at DESC');
+    return rows.map(_achievementFromRow).toList();
+  }
+
+  @override
+  Future<Achievement?> recordNoteCreated(String noteId) =>
+      _recordAchievementProgress(
+        kind: AchievementKind.notesCreated,
+        countedTable: 'achievement_counted_notes',
+        idColumn: 'note_id',
+        sourceId: noteId,
+      );
+
+  @override
+  Future<Achievement?> recordTodoCompleted(String todoId) =>
+      _recordAchievementProgress(
+        kind: AchievementKind.todosCompleted,
+        countedTable: 'achievement_counted_todos',
+        idColumn: 'todo_id',
+        sourceId: todoId,
+      );
+
+  Future<Achievement?> _recordAchievementProgress({
+    required AchievementKind kind,
+    required String countedTable,
+    required String idColumn,
+    required String sourceId,
+  }) async {
+    return _db.transaction((txn) async {
+      final counted = await txn.query(
+        countedTable,
+        where: '$idColumn = ?',
+        whereArgs: [sourceId],
+        limit: 1,
+      );
+      if (counted.isNotEmpty) return null;
+
+      await txn.insert(countedTable, {idColumn: sourceId});
+      final progress = await txn.query(
+        'achievement_progress',
+        columns: ['count'],
+        where: 'kind = ?',
+        whereArgs: [kind.name],
+        limit: 1,
+      );
+      final count = (progress.single['count']! as int) + 1;
+      await txn.update(
+        'achievement_progress',
+        {'count': count},
+        where: 'kind = ?',
+        whereArgs: [kind.name],
+      );
+      if (!_achievementMilestones.contains(count)) return null;
+
+      final unlockedAt = DateTime.now();
+      await _insertAchievement(
+        txn,
+        kind,
+        count,
+        unlockedAt.millisecondsSinceEpoch,
+      );
+      return Achievement(
+        id: '${kind.name}_$count',
+        kind: kind,
+        milestone: count,
+        unlockedAt: unlockedAt,
+      );
+    });
+  }
+
+  static Future<void> _insertAchievement(
+    DatabaseExecutor db,
+    AchievementKind kind,
+    int milestone,
+    int unlockedAt,
+  ) async {
+    await db.insert('achievements', {
+      'id': '${kind.name}_$milestone',
+      'kind': kind.name,
+      'milestone': milestone,
+      'unlocked_at': unlockedAt,
+    }, conflictAlgorithm: ConflictAlgorithm.ignore);
+  }
+
+  Achievement _achievementFromRow(Map<String, Object?> row) => Achievement(
+    id: row['id']! as String,
+    kind: AchievementKind.values.firstWhere((kind) => kind.name == row['kind']),
+    milestone: row['milestone']! as int,
+    unlockedAt: DateTime.fromMillisecondsSinceEpoch(row['unlocked_at']! as int),
+  );
 
   Todo _todoFromRow(Map<String, Object?> row) => Todo(
     id: row['id']! as String,

@@ -2,6 +2,7 @@ import 'dart:math';
 
 import 'package:flutter/material.dart';
 
+import '../models/achievement.dart';
 import '../models/note.dart';
 import '../state/app_controller.dart';
 import '../widgets/note_card.dart';
@@ -21,11 +22,13 @@ class _HomeShellState extends State<HomeShell> {
 
   var _index = 0;
   bool _historyTodayChecked = false;
+  bool _achievementDialogActive = false;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     final app = AppScope.of(context);
+    _scheduleAchievementDialog(app);
     if (_historyTodayChecked || app.loading) return;
     _historyTodayChecked = true;
 
@@ -43,6 +46,24 @@ class _HomeShellState extends State<HomeShell> {
     }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _showHistoryToday(memories, now);
+    });
+  }
+
+  void _scheduleAchievementDialog(AppController app) {
+    if (_achievementDialogActive) return;
+    final achievement = app.takePendingAchievement();
+    if (achievement == null) return;
+    _achievementDialogActive = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) =>
+            _AchievementUnlockedDialog(achievement: achievement),
+      );
+      _achievementDialogActive = false;
+      if (mounted) _scheduleAchievementDialog(AppScope.read(context));
     });
   }
 
@@ -92,6 +113,67 @@ class _HomeShellState extends State<HomeShell> {
       ),
     ),
   );
+}
+
+class _AchievementUnlockedDialog extends StatelessWidget {
+  const _AchievementUnlockedDialog({required this.achievement});
+
+  final Achievement achievement;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return AlertDialog(
+      icon: Container(
+        width: 72,
+        height: 72,
+        decoration: BoxDecoration(
+          color: colors.primaryContainer,
+          shape: BoxShape.circle,
+        ),
+        child: Icon(
+          achievement.kind == AchievementKind.notesCreated
+              ? Icons.auto_stories_rounded
+              : Icons.emoji_events_rounded,
+          size: 38,
+          color: colors.primary,
+        ),
+      ),
+      title: const Text('成就达成'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            achievement.title,
+            style: Theme.of(context).textTheme.headlineSmall
+                ?.copyWith(fontWeight: FontWeight.w800),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 10),
+          Text(
+            achievement.description,
+            style: Theme.of(context).textTheme.bodyLarge,
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '每一步记录，都值得被纪念。',
+            style: Theme.of(context).textTheme.bodyMedium
+                ?.copyWith(color: colors.onSurfaceVariant),
+            textAlign: TextAlign.center,
+          ),
+        ],
+      ),
+      actionsAlignment: MainAxisAlignment.center,
+      actions: [
+        FilledButton.icon(
+          onPressed: () => Navigator.pop(context),
+          icon: const Icon(Icons.celebration_rounded),
+          label: const Text('收下成就'),
+        ),
+      ],
+    );
+  }
 }
 
 class _HistoryTodayDialog extends StatelessWidget {

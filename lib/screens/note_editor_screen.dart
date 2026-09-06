@@ -330,7 +330,7 @@ class _NoteEditorScreenState extends State<NoteEditorScreen>
         _discarded = true;
         await _app.trash([note.id]);
       } else {
-        await _app.save(note);
+        await _app.save(note, isNew: !_persisted);
         _persisted = true;
       }
       _dirty = false;
