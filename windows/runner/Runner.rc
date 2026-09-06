@@ -89,13 +89,13 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
-            VALUE "CompanyName", "com.example" "\0"
-            VALUE "FileDescription", "moment" "\0"
+            VALUE "CompanyName", "Moment" "\0"
+            VALUE "FileDescription", "Moment - Notes and Todos" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "moment" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2026 com.example. All rights reserved." "\0"
+            VALUE "InternalName", "Moment" "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2026 Moment. All rights reserved." "\0"
             VALUE "OriginalFilename", "moment.exe" "\0"
-            VALUE "ProductName", "moment" "\0"
+            VALUE "ProductName", "Moment" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

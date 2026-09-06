@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:path/path.dart' as p;
 import 'package:sqflite/sqflite.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart' as ffi;
 
 import '../models/note.dart';
 import '../models/todo.dart';
@@ -26,7 +28,15 @@ abstract interface class NoteRepository {
 }
 
 class SqliteNoteRepository
-    implements NoteRepository, TodoRepository, AchievementRepository {
+    implements
+        NoteRepository,
+        TodoRepository,
+        AchievementRepository,
+        WindowsReminderDeliveryRepository {
+  SqliteNoteRepository({this.databaseFactoryOverride, this.databasePath});
+
+  final ffi.DatabaseFactory? databaseFactoryOverride;
+  final String? databasePath;
   Database? _database;
   final _changes = StreamController<void>.broadcast();
 
@@ -37,13 +47,17 @@ class SqliteNoteRepository
 
   @override
   Future<void> initialize() async {
-    final root = await getDatabasesPath();
-    _database = await openDatabase(
-      p.join(root, 'moment.sqlite'),
-      version: 8,
-      onConfigure: (db) => db.execute('PRAGMA foreign_keys = ON'),
-      onCreate: (db, version) async {
-        await db.execute('''
+    final factory = databaseFactoryOverride ?? databaseFactory;
+    final root = databasePath == null ? await factory.getDatabasesPath() : null;
+    final path = databasePath ?? p.join(root!, 'moment.sqlite');
+    await Directory(p.dirname(path)).create(recursive: true);
+    _database = await factory.openDatabase(
+      path,
+      options: ffi.OpenDatabaseOptions(
+        version: 9,
+        onConfigure: (db) => db.execute('PRAGMA foreign_keys = ON'),
+        onCreate: (db, version) async {
+          await db.execute('''
           CREATE TABLE notes (
             id TEXT PRIMARY KEY,
             title TEXT NOT NULL,
@@ -54,18 +68,18 @@ class SqliteNoteRepository
             deleted_at INTEGER
           )
         ''');
-        await db.execute(
-          'CREATE INDEX notes_deleted_updated ON notes(deleted_at, updated_at DESC)',
-        );
-        await db.execute('CREATE TABLE tags (name TEXT PRIMARY KEY)');
-        await db.execute('''
+          await db.execute(
+            'CREATE INDEX notes_deleted_updated ON notes(deleted_at, updated_at DESC)',
+          );
+          await db.execute('CREATE TABLE tags (name TEXT PRIMARY KEY)');
+          await db.execute('''
           CREATE TABLE note_tags (
             note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
             tag_name TEXT NOT NULL REFERENCES tags(name) ON DELETE CASCADE,
             PRIMARY KEY(note_id, tag_name)
           )
         ''');
-        await db.execute('''
+          await db.execute('''
           CREATE TABLE attachments (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
@@ -73,7 +87,7 @@ class SqliteNoteRepository
             sort_order INTEGER NOT NULL
           )
         ''');
-        await db.execute('''
+          await db.execute('''
           CREATE TABLE video_attachments (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
@@ -81,7 +95,7 @@ class SqliteNoteRepository
             sort_order INTEGER NOT NULL
           )
         ''');
-        await db.execute('''
+          await db.execute('''
           CREATE TABLE audio_attachments (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
@@ -89,36 +103,39 @@ class SqliteNoteRepository
             sort_order INTEGER NOT NULL
           )
         ''');
-        await _createTodosTable(db);
-        await _createAchievementTables(db, seedExisting: false);
-        for (final tag in const ['工作', '学习', '生活', '重要', '随笔']) {
-          await db.insert('tags', {'name': tag});
-        }
-      },
-      onUpgrade: (db, oldVersion, newVersion) async {
-        if (oldVersion < 2) {
           await _createTodosTable(db);
-        } else {
-          if (oldVersion < 3) {
-            await db.execute('ALTER TABLE todos ADD COLUMN repeat_day INTEGER');
-            await db.execute(
-              'ALTER TABLE todos ADD COLUMN repeat_month INTEGER',
-            );
+          await _createAchievementTables(db, seedExisting: false);
+          await _createWindowsReminderDeliveriesTable(db);
+          for (final tag in const ['工作', '学习', '生活', '重要', '随笔']) {
+            await db.insert('tags', {'name': tag});
           }
-          if (oldVersion < 4) {
-            await db.execute(
-              "ALTER TABLE todos ADD COLUMN priority TEXT NOT NULL DEFAULT 'p1'",
-            );
+        },
+        onUpgrade: (db, oldVersion, newVersion) async {
+          if (oldVersion < 2) {
+            await _createTodosTable(db);
+          } else {
+            if (oldVersion < 3) {
+              await db.execute(
+                'ALTER TABLE todos ADD COLUMN repeat_day INTEGER',
+              );
+              await db.execute(
+                'ALTER TABLE todos ADD COLUMN repeat_month INTEGER',
+              );
+            }
+            if (oldVersion < 4) {
+              await db.execute(
+                "ALTER TABLE todos ADD COLUMN priority TEXT NOT NULL DEFAULT 'p1'",
+              );
+            }
+            if (oldVersion < 5) {
+              await db.execute(
+                'ALTER TABLE todos ADD COLUMN reminder_enabled INTEGER NOT NULL DEFAULT 0',
+              );
+            }
           }
-          if (oldVersion < 5) {
-            await db.execute(
-              'ALTER TABLE todos ADD COLUMN reminder_enabled INTEGER NOT NULL DEFAULT 0',
-            );
-          }
-        }
-        if (oldVersion < 6) {
-          await db.execute('DROP TABLE IF EXISTS checklist_items');
-          await db.execute('''
+          if (oldVersion < 6) {
+            await db.execute('DROP TABLE IF EXISTS checklist_items');
+            await db.execute('''
             CREATE TABLE video_attachments (
               id INTEGER PRIMARY KEY AUTOINCREMENT,
               note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
@@ -126,9 +143,9 @@ class SqliteNoteRepository
               sort_order INTEGER NOT NULL
             )
           ''');
-        }
-        if (oldVersion < 7) {
-          await db.execute('''
+          }
+          if (oldVersion < 7) {
+            await db.execute('''
             CREATE TABLE audio_attachments (
               id INTEGER PRIMARY KEY AUTOINCREMENT,
               note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
@@ -136,12 +153,33 @@ class SqliteNoteRepository
               sort_order INTEGER NOT NULL
             )
           ''');
-        }
-        if (oldVersion < 8) {
-          await _createAchievementTables(db, seedExisting: true);
-        }
-      },
+          }
+          if (oldVersion < 8) {
+            await _createAchievementTables(db, seedExisting: true);
+          }
+          if (oldVersion < 9) {
+            await _createWindowsReminderDeliveriesTable(db);
+          }
+        },
+      ),
     );
+  }
+
+  Future<void> _createWindowsReminderDeliveriesTable(
+    DatabaseExecutor db,
+  ) async {
+    await db.execute('''
+      CREATE TABLE windows_reminder_deliveries (
+        todo_id TEXT NOT NULL,
+        due_at INTEGER NOT NULL,
+        delivered_at INTEGER NOT NULL,
+        PRIMARY KEY(todo_id, due_at)
+      )
+    ''');
+    await db.execute('''
+      CREATE INDEX windows_reminder_delivered_at
+      ON windows_reminder_deliveries(delivered_at)
+    ''');
   }
 
   static const _achievementMilestones = [10, 100, 250, 1000];
@@ -692,6 +730,36 @@ class SqliteNoteRepository
     await _db.delete('todos', where: 'id IN ($marks)', whereArgs: list);
     _changes.add(null);
   }
+
+  @override
+  Future<bool> wasWindowsReminderDelivered(
+    String todoId,
+    DateTime dueAt,
+  ) async {
+    final rows = await _db.query(
+      'windows_reminder_deliveries',
+      columns: ['todo_id'],
+      where: 'todo_id = ? AND due_at = ?',
+      whereArgs: [todoId, dueAt.millisecondsSinceEpoch],
+      limit: 1,
+    );
+    return rows.isNotEmpty;
+  }
+
+  @override
+  Future<void> markWindowsReminderDelivered(String todoId, DateTime dueAt) =>
+      _db.insert('windows_reminder_deliveries', {
+        'todo_id': todoId,
+        'due_at': dueAt.millisecondsSinceEpoch,
+        'delivered_at': DateTime.now().millisecondsSinceEpoch,
+      }, conflictAlgorithm: ConflictAlgorithm.ignore);
+
+  @override
+  Future<void> pruneWindowsReminderDeliveries(DateTime before) => _db.delete(
+    'windows_reminder_deliveries',
+    where: 'delivered_at < ?',
+    whereArgs: [before.millisecondsSinceEpoch],
+  );
 
   @override
   Future<void> close() async {

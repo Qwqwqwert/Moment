@@ -1,13 +1,19 @@
+import 'dart:io';
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../models/note.dart';
 import '../models/todo.dart';
 import '../state/app_controller.dart';
+import '../theme/desktop_environment.dart';
 import 'note_library_screens.dart';
 
 class TodosScreen extends StatefulWidget {
-  const TodosScreen({super.key});
+  const TodosScreen({super.key, this.desktop = false});
+
+  final bool desktop;
 
   @override
   State<TodosScreen> createState() => _TodosScreenState();
@@ -86,7 +92,7 @@ class _TodosScreenState extends State<TodosScreen> {
     await Future<void>.delayed(const Duration(milliseconds: 240));
     if (!mounted || request != _revealRequest) return;
     final targetContext = _todoKeys[targetId]?.currentContext;
-    if (targetContext == null) return;
+    if (targetContext == null || !targetContext.mounted) return;
     await Scrollable.ensureVisible(
       targetContext,
       duration: const Duration(milliseconds: 360),
@@ -118,6 +124,17 @@ class _TodosScreenState extends State<TodosScreen> {
   }
 
   Future<void> _openEditor([Todo? todo]) async {
+    if (widget.desktop) {
+      await showDialog<void>(
+        context: context,
+        builder: (_) => TodoEditorScreen(
+          todoId: todo?.id,
+          initialDate: _selected,
+          desktopDialog: true,
+        ),
+      );
+      return;
+    }
     await Navigator.push<void>(
       context,
       MaterialPageRoute(
@@ -217,9 +234,67 @@ class _TodosScreenState extends State<TodosScreen> {
       });
     }
     final theme = Theme.of(context);
+    final taskList = ListView(
+      padding: EdgeInsets.fromLTRB(
+        widget.desktop ? 12 : 16,
+        widget.desktop ? 10 : 2,
+        widget.desktop ? 16 : 16,
+        100,
+      ),
+      children: [
+        if (todos.isEmpty) ...[
+          const SizedBox(height: 12),
+          _TodoEmpty(onAdd: _openEditor),
+          const SizedBox(height: 18),
+        ],
+        _TodoGroupSection(
+          title: '已逾期',
+          todos: overdue,
+          expanded: _overdueExpanded,
+          countColor: theme.colorScheme.error,
+          completingTodoIds: _completingTodoIds,
+          flashDate: _flashDate,
+          flashGeneration: _flashGeneration,
+          todoKeys: _todoKeys,
+          onToggle: () => setState(() => _overdueExpanded = !_overdueExpanded),
+          onOpen: _openEditor,
+          onComplete: (todo) => _completeTodo(app, todo),
+        ),
+        const SizedBox(height: 10),
+        _TodoGroupSection(
+          title: '7天内',
+          todos: withinSevenDays,
+          expanded: _withinSevenDaysExpanded,
+          completingTodoIds: _completingTodoIds,
+          flashDate: _flashDate,
+          flashGeneration: _flashGeneration,
+          todoKeys: _todoKeys,
+          onToggle: () => setState(
+            () => _withinSevenDaysExpanded = !_withinSevenDaysExpanded,
+          ),
+          onOpen: _openEditor,
+          onComplete: (todo) => _completeTodo(app, todo),
+        ),
+        const SizedBox(height: 10),
+        _TodoGroupSection(
+          title: '7天之后',
+          todos: afterSevenDays,
+          expanded: _afterSevenDaysExpanded,
+          completingTodoIds: _completingTodoIds,
+          flashDate: _flashDate,
+          flashGeneration: _flashGeneration,
+          todoKeys: _todoKeys,
+          onToggle: () => setState(
+            () => _afterSevenDaysExpanded = !_afterSevenDaysExpanded,
+          ),
+          onOpen: _openEditor,
+          onComplete: (todo) => _completeTodo(app, todo),
+        ),
+      ],
+    );
     return Scaffold(
       appBar: AppBar(
-        toolbarHeight: 78,
+        toolbarHeight: widget.desktop ? 56 : 78,
         automaticallyImplyLeading: false,
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -237,84 +312,90 @@ class _TodosScreenState extends State<TodosScreen> {
           ],
         ),
         actions: [
+          if (widget.desktop) ...[
+            IconButton(
+              tooltip: '选择日期',
+              onPressed: _pickDate,
+              icon: const Icon(Icons.calendar_month_outlined),
+            ),
+            IconButton(
+              tooltip: '已完成',
+              onPressed: () => _openDestination('completed'),
+              icon: const Icon(Icons.history_rounded),
+            ),
+            IconButton(
+              tooltip: '回收站',
+              onPressed: () => _openDestination('trash'),
+              icon: const Icon(Icons.delete_outline_rounded),
+            ),
+          ],
           _TodoHomeMenu(onNavigate: _openDestination),
+          if (widget.desktop) ...[
+            const SizedBox(width: 8),
+            FilledButton.icon(
+              onPressed: _openEditor,
+              icon: const Icon(Icons.add_rounded, size: 18),
+              label: const Text('新建待办'),
+            ),
+          ],
           const SizedBox(width: 12),
         ],
       ),
-      body: Column(
-        children: [
-          _TodoCalendar(
-            selected: _selected,
-            visibleMonth: _visibleMonth,
-            todos: app.todos,
-            onSelected: _selectDate,
-            onPreviousMonth: () => _changeMonth(-1),
-            onNextMonth: () => _changeMonth(1),
-            onPickMonth: _pickDate,
-          ),
-          Expanded(
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(16, 2, 16, 100),
-              children: [
-                _TodoGroupSection(
-                  title: '已逾期',
-                  todos: overdue,
-                  expanded: _overdueExpanded,
-                  countColor: theme.colorScheme.error,
-                  completingTodoIds: _completingTodoIds,
-                  flashDate: _flashDate,
-                  flashGeneration: _flashGeneration,
-                  todoKeys: _todoKeys,
-                  onToggle: () =>
-                      setState(() => _overdueExpanded = !_overdueExpanded),
-                  onOpen: _openEditor,
-                  onComplete: (todo) => _completeTodo(app, todo),
+      body: widget.desktop
+          ? LayoutBuilder(
+              builder: (context, constraints) {
+                final calendarWidth = constraints.maxWidth * .7;
+                return Row(
+                  children: [
+                    SizedBox(
+                      width: calendarWidth,
+                      child: ColoredBox(
+                        color: theme.colorScheme.surfaceContainerLowest,
+                        child: _TodoCalendar(
+                          desktop: true,
+                          selected: _selected,
+                          visibleMonth: _visibleMonth,
+                          todos: app.todos,
+                          onSelected: _selectDate,
+                          onPreviousMonth: () => _changeMonth(-1),
+                          onNextMonth: () => _changeMonth(1),
+                          onPickMonth: _pickDate,
+                        ),
+                      ),
+                    ),
+                    const VerticalDivider(),
+                    Expanded(child: taskList),
+                  ],
+                );
+              },
+            )
+          : Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 980),
+                child: Column(
+                  children: [
+                    _TodoCalendar(
+                      selected: _selected,
+                      visibleMonth: _visibleMonth,
+                      todos: app.todos,
+                      onSelected: _selectDate,
+                      onPreviousMonth: () => _changeMonth(-1),
+                      onNextMonth: () => _changeMonth(1),
+                      onPickMonth: _pickDate,
+                    ),
+                    Expanded(child: taskList),
+                  ],
                 ),
-                const SizedBox(height: 10),
-                _TodoGroupSection(
-                  title: '7天内',
-                  todos: withinSevenDays,
-                  expanded: _withinSevenDaysExpanded,
-                  completingTodoIds: _completingTodoIds,
-                  flashDate: _flashDate,
-                  flashGeneration: _flashGeneration,
-                  todoKeys: _todoKeys,
-                  onToggle: () => setState(
-                    () => _withinSevenDaysExpanded = !_withinSevenDaysExpanded,
-                  ),
-                  onOpen: _openEditor,
-                  onComplete: (todo) => _completeTodo(app, todo),
-                ),
-                const SizedBox(height: 10),
-                _TodoGroupSection(
-                  title: '7天之后',
-                  todos: afterSevenDays,
-                  expanded: _afterSevenDaysExpanded,
-                  completingTodoIds: _completingTodoIds,
-                  flashDate: _flashDate,
-                  flashGeneration: _flashGeneration,
-                  todoKeys: _todoKeys,
-                  onToggle: () => setState(
-                    () => _afterSevenDaysExpanded = !_afterSevenDaysExpanded,
-                  ),
-                  onOpen: _openEditor,
-                  onComplete: (todo) => _completeTodo(app, todo),
-                ),
-                if (todos.isEmpty) ...[
-                  const SizedBox(height: 28),
-                  _TodoEmpty(onAdd: _openEditor),
-                ],
-              ],
+              ),
             ),
-          ),
-        ],
-      ),
-      floatingActionButton: FloatingActionButton(
-        heroTag: 'todos-primary-action',
-        onPressed: _openEditor,
-        tooltip: '新建待办',
-        child: const Icon(Icons.add_rounded),
-      ),
+      floatingActionButton: widget.desktop
+          ? null
+          : FloatingActionButton(
+              heroTag: 'todos-primary-action',
+              onPressed: _openEditor,
+              tooltip: '新建待办',
+              child: const Icon(Icons.add_rounded),
+            ),
     );
   }
 }
@@ -615,6 +696,7 @@ class _RepeatDateChoice extends StatelessWidget {
 
 class _TodoCalendar extends StatelessWidget {
   const _TodoCalendar({
+    this.desktop = false,
     required this.selected,
     required this.visibleMonth,
     required this.todos,
@@ -624,6 +706,7 @@ class _TodoCalendar extends StatelessWidget {
     required this.onPickMonth,
   });
 
+  final bool desktop;
   final DateTime selected;
   final DateTime visibleMonth;
   final List<Todo> todos;
@@ -653,194 +736,219 @@ class _TodoCalendar extends StatelessWidget {
       Color.fromARGB(255, 255, 85, 0),
     );
     return Container(
-      margin: const EdgeInsets.fromLTRB(16, 4, 16, 8),
-      padding: const EdgeInsets.fromLTRB(12, 6, 12, 10),
+      margin: desktop
+          ? const EdgeInsets.fromLTRB(16, 12, 16, 12)
+          : const EdgeInsets.fromLTRB(16, 4, 16, 8),
+      padding: desktop
+          ? const EdgeInsets.fromLTRB(14, 12, 14, 14)
+          : const EdgeInsets.fromLTRB(12, 6, 12, 10),
       decoration: BoxDecoration(
         color: colors.surface,
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(desktop ? 10 : 20),
       ),
-      child: Column(
-        children: [
-          Row(
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final gridRowHeight = desktop
+              ? math.max(42.0, (constraints.maxHeight - 102) / 6)
+              : 36.0;
+          return Column(
             children: [
-              IconButton(
-                tooltip: '上个月',
-                onPressed: onPreviousMonth,
-                visualDensity: VisualDensity.compact,
-                icon: const Icon(Icons.chevron_left_rounded),
-              ),
-              Expanded(
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(12),
-                  onTap: onPickMonth,
-                  child: SizedBox(
-                    height: 38,
-                    child: Center(
-                      child: Text(
-                        '${visibleMonth.year}年${visibleMonth.month}月',
-                        style: theme.textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
+              Row(
+                children: [
+                  IconButton(
+                    tooltip: '上个月',
+                    onPressed: onPreviousMonth,
+                    visualDensity: VisualDensity.compact,
+                    icon: const Icon(Icons.chevron_left_rounded),
                   ),
-                ),
-              ),
-              IconButton(
-                tooltip: '下个月',
-                onPressed: onNextMonth,
-                visualDensity: VisualDensity.compact,
-                icon: const Icon(Icons.chevron_right_rounded),
-              ),
-            ],
-          ),
-          const SizedBox(height: 2),
-          Row(
-            children: const ['日', '一', '二', '三', '四', '五', '六']
-                .map(
-                  (weekday) => Expanded(
-                    child: Text(
-                      weekday,
-                      textAlign: TextAlign.center,
-                      style: TextStyle(fontSize: 12),
-                    ),
-                  ),
-                )
-                .toList(),
-          ),
-          const SizedBox(height: 4),
-          GridView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            itemCount: 42,
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 7,
-              mainAxisExtent: 36,
-              crossAxisSpacing: 4,
-            ),
-            itemBuilder: (context, index) {
-              final date = days[index];
-              final dayTodos = _todosOn(date).toList();
-              final hasNormal = dayTodos.any(
-                (todo) => todo.repeat == TodoRepeat.none,
-              );
-              final hasRepeating = dayTodos.any(
-                (todo) => todo.repeat != TodoRepeat.none,
-              );
-              final isSelected = DateUtils.isSameDay(date, selected);
-              final isToday = DateUtils.isSameDay(date, today);
-              final isCurrentMonth =
-                  date.year == visibleMonth.year &&
-                  date.month == visibleMonth.month;
-              final hasTodo = hasNormal || hasRepeating;
-
-              return Opacity(
-                opacity: isCurrentMonth ? 1 : .42,
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(12),
-                  onTap: () => onSelected(date),
-                  child: Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      AnimatedContainer(
-                        duration: const Duration(milliseconds: 180),
-                        curve: Curves.easeOut,
-                        decoration: BoxDecoration(
-                          color: hasTodo
-                              ? colors.primaryContainer.withValues(alpha: .55)
-                              : Colors.transparent,
-                          borderRadius: BorderRadius.circular(12),
-                          border: isToday && !isSelected
-                              ? Border.all(color: colors.primary)
-                              : null,
-                        ),
-                      ),
-                      AnimatedScale(
-                        scale: isSelected ? 1 : .72,
-                        duration: const Duration(milliseconds: 220),
-                        curve: Curves.easeOutBack,
-                        child: AnimatedOpacity(
-                          opacity: isSelected ? 1 : 0,
-                          duration: const Duration(milliseconds: 140),
-                          child: DecoratedBox(
-                            decoration: BoxDecoration(
-                              color: colors.primary,
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                          ),
-                        ),
-                      ),
-                      Align(
-                        alignment: Alignment.center,
-                        child: Padding(
-                          padding: const EdgeInsets.only(bottom: 5),
-                          child: AnimatedDefaultTextStyle(
-                            duration: const Duration(milliseconds: 140),
-                            curve: Curves.easeOut,
+                  Expanded(
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(12),
+                      onTap: onPickMonth,
+                      child: SizedBox(
+                        height: 38,
+                        child: Center(
+                          child: Text(
+                            '${visibleMonth.year}年${visibleMonth.month}月',
                             style:
-                                (theme.textTheme.bodyMedium ??
-                                        const TextStyle())
-                                    .copyWith(
-                                      color: isSelected
-                                          ? colors.onPrimary
-                                          : colors.onSurface,
-                                      fontWeight: isSelected || hasTodo
-                                          ? FontWeight.w700
-                                          : FontWeight.w400,
-                                    ),
-                            child: Text('${date.day}'),
+                                (desktop
+                                        ? theme.textTheme.titleLarge
+                                        : theme.textTheme.titleMedium)
+                                    ?.copyWith(fontWeight: FontWeight.w700),
                           ),
                         ),
                       ),
-                      if (hasTodo)
-                        Positioned(
-                          bottom: 3,
-                          left: 0,
-                          right: 0,
-                          child: Center(
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                if (hasNormal)
-                                  _CalendarDot(color: markerColors.normal),
-                                if (hasNormal && hasRepeating)
-                                  const SizedBox(width: 3),
-                                if (hasRepeating)
-                                  _CalendarDot(color: markerColors.repeating),
-                              ],
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: '下个月',
+                    onPressed: onNextMonth,
+                    visualDensity: VisualDensity.compact,
+                    icon: const Icon(Icons.chevron_right_rounded),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 2),
+              Row(
+                children: const ['日', '一', '二', '三', '四', '五', '六']
+                    .map(
+                      (weekday) => Expanded(
+                        child: Text(
+                          weekday,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(fontSize: desktop ? 14 : 12),
+                        ),
+                      ),
+                    )
+                    .toList(),
+              ),
+              const SizedBox(height: 4),
+              GridView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: 42,
+                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 7,
+                  mainAxisExtent: gridRowHeight,
+                  crossAxisSpacing: desktop ? 6 : 4,
+                  mainAxisSpacing: desktop ? 2 : 0,
+                ),
+                itemBuilder: (context, index) {
+                  final date = days[index];
+                  final dayTodos = _todosOn(date).toList();
+                  final hasNormal = dayTodos.any(
+                    (todo) => todo.repeat == TodoRepeat.none,
+                  );
+                  final hasRepeating = dayTodos.any(
+                    (todo) => todo.repeat != TodoRepeat.none,
+                  );
+                  final isSelected = DateUtils.isSameDay(date, selected);
+                  final isToday = DateUtils.isSameDay(date, today);
+                  final isCurrentMonth =
+                      date.year == visibleMonth.year &&
+                      date.month == visibleMonth.month;
+                  final hasTodo = hasNormal || hasRepeating;
+
+                  return Opacity(
+                    opacity: isCurrentMonth ? 1 : .42,
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(12),
+                      onTap: () => onSelected(date),
+                      child: Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          AnimatedContainer(
+                            duration: const Duration(milliseconds: 180),
+                            curve: Curves.easeOut,
+                            decoration: BoxDecoration(
+                              color: hasTodo
+                                  ? colors.primaryContainer.withValues(
+                                      alpha: .55,
+                                    )
+                                  : Colors.transparent,
+                              borderRadius: BorderRadius.circular(12),
+                              border: isToday && !isSelected
+                                  ? Border.all(color: colors.primary)
+                                  : null,
                             ),
                           ),
-                        ),
-                    ],
-                  ),
-                ),
-              );
-            },
-          ),
-          const SizedBox(height: 7),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              _CalendarLegend(color: markerColors.normal, label: '普通待办'),
-              const SizedBox(width: 16),
-              _CalendarLegend(color: markerColors.repeating, label: '重复待办'),
+                          AnimatedScale(
+                            scale: isSelected ? 1 : .72,
+                            duration: const Duration(milliseconds: 220),
+                            curve: Curves.easeOutBack,
+                            child: AnimatedOpacity(
+                              opacity: isSelected ? 1 : 0,
+                              duration: const Duration(milliseconds: 140),
+                              child: DecoratedBox(
+                                decoration: BoxDecoration(
+                                  color: colors.primary,
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                              ),
+                            ),
+                          ),
+                          Align(
+                            alignment: Alignment.center,
+                            child: Padding(
+                              padding: const EdgeInsets.only(bottom: 5),
+                              child: AnimatedDefaultTextStyle(
+                                duration: const Duration(milliseconds: 140),
+                                curve: Curves.easeOut,
+                                style:
+                                    (desktop
+                                            ? theme.textTheme.titleMedium
+                                            : theme.textTheme.bodyMedium)
+                                        ?.copyWith(
+                                          color: isSelected
+                                              ? colors.onPrimary
+                                              : colors.onSurface,
+                                          fontWeight: isSelected || hasTodo
+                                              ? FontWeight.w700
+                                              : FontWeight.w400,
+                                        ) ??
+                                    const TextStyle(),
+                                child: Text('${date.day}'),
+                              ),
+                            ),
+                          ),
+                          if (hasTodo)
+                            Positioned(
+                              bottom: 3,
+                              left: 0,
+                              right: 0,
+                              child: Center(
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    if (hasNormal)
+                                      _CalendarDot(
+                                        color: markerColors.normal,
+                                        dimension: desktop ? 9 : 5,
+                                      ),
+                                    if (hasNormal && hasRepeating)
+                                      const SizedBox(width: 3),
+                                    if (hasRepeating)
+                                      _CalendarDot(
+                                        color: markerColors.repeating,
+                                        dimension: desktop ? 9 : 5,
+                                      ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+              SizedBox(height: desktop ? 10 : 7),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  _CalendarLegend(color: markerColors.normal, label: '普通待办'),
+                  const SizedBox(width: 16),
+                  _CalendarLegend(color: markerColors.repeating, label: '重复待办'),
+                ],
+              ),
             ],
-          ),
-        ],
+          );
+        },
       ),
     );
   }
 }
 
 class _CalendarDot extends StatelessWidget {
-  const _CalendarDot({required this.color});
+  const _CalendarDot({required this.color, this.dimension = 5});
 
   final Color color;
+  final double dimension;
 
   @override
   Widget build(BuildContext context) => DecoratedBox(
     decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-    child: const SizedBox.square(dimension: 5),
+    child: SizedBox.square(dimension: dimension),
   );
 }
 
@@ -903,16 +1011,20 @@ class _TodoGroupSection extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colors = theme.colorScheme;
+    final desktop = DesktopEnvironment.isDesktopOf(context);
     return Column(
       children: [
         Material(
           color: colors.surfaceContainerLow,
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(desktop ? 7 : 16),
           child: InkWell(
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(desktop ? 7 : 16),
             onTap: onToggle,
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 11),
+              padding: EdgeInsets.symmetric(
+                horizontal: desktop ? 11 : 15,
+                vertical: desktop ? 8 : 11,
+              ),
               child: Row(
                 children: [
                   AnimatedRotation(
@@ -1068,24 +1180,32 @@ class _TodoCardState extends State<_TodoCard>
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final desktop = DesktopEnvironment.isDesktopOf(context);
     final overdue =
         !widget.completed && widget.todo.dueAt.isBefore(DateTime.now());
     final card = AnimatedBuilder(
       animation: _flash,
       builder: (context, child) => Card(
-        margin: const EdgeInsets.only(bottom: 10),
+        margin: EdgeInsets.only(bottom: desktop ? 5 : 10),
         elevation: 0,
         color: Color.lerp(
           theme.cardTheme.color ?? theme.colorScheme.surface,
           theme.colorScheme.primaryContainer,
           _flash.value * .82,
         ),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(desktop ? 7 : 18),
+        ),
         child: InkWell(
-          borderRadius: BorderRadius.circular(18),
+          borderRadius: BorderRadius.circular(desktop ? 7 : 18),
           onTap: widget.onTap,
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(10, 12, 14, 12),
+            padding: EdgeInsets.fromLTRB(
+              desktop ? 6 : 10,
+              desktop ? 8 : 12,
+              desktop ? 8 : 14,
+              desktop ? 8 : 12,
+            ),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -1157,6 +1277,22 @@ class _TodoCardState extends State<_TodoCard>
                     ],
                   ),
                 ),
+                if (desktop)
+                  PopupMenuButton<String>(
+                    tooltip: '更多操作',
+                    onSelected: (value) {
+                      if (value == 'edit') widget.onTap();
+                      if (value == 'complete') widget.onComplete();
+                    },
+                    itemBuilder: (context) => [
+                      const PopupMenuItem(value: 'edit', child: Text('编辑')),
+                      PopupMenuItem(
+                        value: 'complete',
+                        child: Text(widget.completed ? '恢复待办' : '完成待办'),
+                      ),
+                    ],
+                    icon: const Icon(Icons.more_horiz_rounded, size: 19),
+                  ),
               ],
             ),
           ),
@@ -1241,9 +1377,15 @@ class _TodoPriorityBadge extends StatelessWidget {
 }
 
 class TodoEditorScreen extends StatefulWidget {
-  const TodoEditorScreen({super.key, this.todoId, required this.initialDate});
+  const TodoEditorScreen({
+    super.key,
+    this.todoId,
+    required this.initialDate,
+    this.desktopDialog = false,
+  });
   final String? todoId;
   final DateTime initialDate;
+  final bool desktopDialog;
 
   @override
   State<TodoEditorScreen> createState() => _TodoEditorScreenState();
@@ -1259,6 +1401,8 @@ class _TodoEditorScreenState extends State<TodoEditorScreen> {
   Todo? _source;
   bool _repeatScheduleChanged = false;
   bool _testingReminder = false;
+
+  bool get _isWindows => Platform.isWindows;
 
   String? get _repeatHint => switch (_repeat) {
     TodoRepeat.weekly => '将于每${_weekdayLabel(_dueAt.weekday)}重复',
@@ -1345,9 +1489,13 @@ class _TodoEditorScreenState extends State<TodoEditorScreen> {
     if (granted) {
       setState(() => _reminderEnabled = true);
     } else {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('需要通知、精确闹钟和全屏提醒权限才能开启提醒')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            _isWindows ? 'Windows 通知当前不可用，请检查系统通知设置' : '需要通知、精确闹钟和全屏提醒权限才能开启提醒',
+          ),
+        ),
+      );
     }
   }
 
@@ -1369,7 +1517,13 @@ class _TodoEditorScreenState extends State<TodoEditorScreen> {
     setState(() => _testingReminder = false);
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(shown ? '测试提醒已发送，请检查通知栏、弹窗、声音和振动' : '请先允许 Moment 发送通知'),
+        content: Text(
+          shown
+              ? (_isWindows
+                    ? '测试提醒已发送，请检查 Windows 通知和勿扰模式'
+                    : '测试提醒已发送，请检查通知栏、弹窗、声音和振动')
+              : '请先允许 Moment 发送通知',
+        ),
       ),
     );
   }
@@ -1399,8 +1553,13 @@ class _TodoEditorScreenState extends State<TodoEditorScreen> {
           .requestTodoReminderPermission();
       if (!mounted) return;
       if (!granted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('请授予全屏提醒权限后再保存')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              _isWindows ? '请先在 Windows 中允许 Moment 通知' : '请授予全屏提醒权限后再保存',
+            ),
+          ),
+        );
         return;
       }
     }
@@ -1462,201 +1621,251 @@ class _TodoEditorScreenState extends State<TodoEditorScreen> {
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(
-      title: Text(_source == null ? '新建待办' : '编辑待办'),
-      actions: [
-        if (_source != null)
-          IconButton(
-            tooltip: '删除',
-            onPressed: _delete,
-            icon: const Icon(Icons.delete_outline_rounded),
-          ),
-        TextButton(onPressed: _save, child: const Text('保存')),
-        const SizedBox(width: 8),
-      ],
-    ),
-    body: ListView(
-      padding: const EdgeInsets.all(20),
-      children: [
-        TextField(
-          controller: _title,
-          autofocus: _source == null,
-          maxLength: 20,
-          inputFormatters: [LengthLimitingTextInputFormatter(20)],
-          decoration: const InputDecoration(
-            labelText: '标题',
-            hintText: '要完成什么？',
-            prefixIcon: Icon(Icons.task_alt_rounded),
-          ),
-        ),
-        const SizedBox(height: 14),
-        TextField(
-          controller: _description,
-          maxLength: 100,
-          maxLines: 4,
-          inputFormatters: [LengthLimitingTextInputFormatter(100)],
-          decoration: const InputDecoration(
-            labelText: '备注',
-            hintText: '补充一些细节（可选）',
-            alignLabelWithHint: true,
-          ),
-        ),
-        const SizedBox(height: 18),
-        Text('截止时间', style: Theme.of(context).textTheme.titleSmall),
-        const SizedBox(height: 8),
-        Row(
-          children: [
-            Expanded(
-              child: OutlinedButton.icon(
-                onPressed: _pickDate,
-                icon: const Icon(Icons.calendar_today_outlined),
-                label: Text(
-                  '${_dueAt.year}-${_dueAt.month.toString().padLeft(2, '0')}-${_dueAt.day.toString().padLeft(2, '0')}',
-                ),
-              ),
+  Widget build(BuildContext context) {
+    final scaffold = Scaffold(
+      appBar: AppBar(
+        leading: widget.desktopDialog
+            ? IconButton(
+                tooltip: '取消',
+                onPressed: () => Navigator.pop(context),
+                icon: const Icon(Icons.close_rounded),
+              )
+            : null,
+        title: Text(_source == null ? '新建待办' : '编辑待办'),
+        actions: [
+          if (_source != null)
+            IconButton(
+              tooltip: '删除',
+              onPressed: _delete,
+              icon: const Icon(Icons.delete_outline_rounded),
             ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: OutlinedButton.icon(
-                onPressed: _pickTime,
-                icon: const Icon(Icons.schedule_rounded),
-                label: Text(_time(_dueAt)),
-              ),
+          if (!widget.desktopDialog)
+            TextButton(onPressed: _save, child: const Text('保存')),
+          const SizedBox(width: 8),
+        ],
+      ),
+      body: ListView(
+        padding: const EdgeInsets.all(20),
+        children: [
+          TextField(
+            controller: _title,
+            autofocus: _source == null,
+            maxLength: 20,
+            inputFormatters: [LengthLimitingTextInputFormatter(20)],
+            decoration: const InputDecoration(
+              labelText: '标题',
+              hintText: '要完成什么？',
+              prefixIcon: Icon(Icons.task_alt_rounded),
             ),
-          ],
-        ),
-        const SizedBox(height: 22),
-        SwitchListTile(
-          contentPadding: const EdgeInsets.symmetric(horizontal: 4),
-          secondary: const Icon(Icons.notifications_active_outlined),
-          title: const Text('提醒'),
-          subtitle: const Text('在截止时间弹出系统通知'),
-          value: _reminderEnabled,
-          onChanged: _setReminder,
-        ),
-        Container(
-          margin: const EdgeInsets.only(top: 2, bottom: 12),
-          padding: const EdgeInsets.fromLTRB(14, 12, 14, 10),
-          decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.surfaceContainerLow,
-            borderRadius: BorderRadius.circular(14),
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+          const SizedBox(height: 14),
+          TextField(
+            controller: _description,
+            maxLength: 100,
+            maxLines: 4,
+            inputFormatters: [LengthLimitingTextInputFormatter(100)],
+            decoration: const InputDecoration(
+              labelText: '备注',
+              hintText: '补充一些细节（可选）',
+              alignLabelWithHint: true,
+            ),
+          ),
+          const SizedBox(height: 18),
+          Text('截止时间', style: Theme.of(context).textTheme.titleSmall),
+          const SizedBox(height: 8),
+          Row(
             children: [
-              Text(
-                '部分安卓手机需要在应用的“通知权限”中自行开启横幅、锁屏、铃声和振动，否则提醒可能只显示在通知栏。',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: _pickDate,
+                  icon: const Icon(Icons.calendar_today_outlined),
+                  label: Text(
+                    '${_dueAt.year}-${_dueAt.month.toString().padLeft(2, '0')}-${_dueAt.day.toString().padLeft(2, '0')}',
+                  ),
                 ),
               ),
-              const SizedBox(height: 6),
-              Wrap(
-                spacing: 8,
-                runSpacing: 4,
-                children: [
-                  TextButton.icon(
-                    onPressed: _openReminderSettings,
-                    icon: const Icon(Icons.open_in_new_rounded, size: 18),
-                    label: const Text('打开通知权限'),
-                  ),
-                  OutlinedButton.icon(
-                    onPressed: _testingReminder ? null : _testReminder,
-                    icon: _testingReminder
-                        ? const SizedBox.square(
-                            dimension: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(
-                            Icons.notifications_active_outlined,
-                            size: 18,
-                          ),
-                    label: const Text('测试提醒'),
-                  ),
-                ],
+              const SizedBox(width: 10),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: _pickTime,
+                  icon: const Icon(Icons.schedule_rounded),
+                  label: Text(_time(_dueAt)),
+                ),
               ),
             ],
           ),
-        ),
-        Text('优先级', style: Theme.of(context).textTheme.titleSmall),
-        const SizedBox(height: 10),
-        Wrap(
-          spacing: 8,
-          children: TodoPriority.values
-              .map(
-                (value) => ChoiceChip(
-                  showCheckmark: false,
-                  label: Text(value.name.toUpperCase()),
-                  selected: _priority == value,
-                  onSelected: (_) => setState(() => _priority = value),
-                ),
-              )
-              .toList(),
-        ),
-        const SizedBox(height: 22),
-        Text('重复', style: Theme.of(context).textTheme.titleSmall),
-        const SizedBox(height: 10),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: TodoRepeat.values
-              .map(
-                (value) => ChoiceChip(
-                  showCheckmark: false,
-                  label: Text(_repeatLabel(value)),
-                  selected: _repeat == value,
-                  onSelected: (_) => setState(() {
-                    if (_repeat != value) _repeatScheduleChanged = true;
-                    _repeat = value;
-                  }),
-                ),
-              )
-              .toList(),
-        ),
-        const SizedBox(height: 12),
-        AnimatedSwitcher(
-          duration: const Duration(milliseconds: 180),
-          child: _repeatHint == null
-              ? const SizedBox.shrink(key: ValueKey('repeat-hint-empty'))
-              : Container(
-                  key: ValueKey(_repeat),
-                  width: double.infinity,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 14,
-                    vertical: 12,
+          const SizedBox(height: 22),
+          SwitchListTile(
+            contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+            secondary: const Icon(Icons.notifications_active_outlined),
+            title: const Text('提醒'),
+            subtitle: Text(
+              _isWindows ? '仅在 Moment 运行或最小化时弹出通知；退出后不会提醒' : '在截止时间弹出系统通知',
+            ),
+            value: _reminderEnabled,
+            onChanged: _setReminder,
+          ),
+          Container(
+            margin: const EdgeInsets.only(top: 2, bottom: 12),
+            padding: const EdgeInsets.fromLTRB(14, 12, 14, 10),
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.surfaceContainerLow,
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  _isWindows
+                      ? '请在 Windows“通知”设置中允许 Moment，并检查勿扰模式。语音录制权限位于“隐私和安全性 > 麦克风”。退出 Moment 后不会提醒。'
+                      : '部分安卓手机需要在应用的“通知权限”中自行开启横幅、锁屏、铃声和振动，否则提醒可能只显示在通知栏。',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
                   ),
-                  decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.primaryContainer,
-                    borderRadius: BorderRadius.circular(14),
+                ),
+                const SizedBox(height: 6),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 4,
+                  children: [
+                    TextButton.icon(
+                      onPressed: _openReminderSettings,
+                      icon: const Icon(Icons.open_in_new_rounded, size: 18),
+                      label: Text(_isWindows ? '打开 Windows 通知设置' : '打开通知权限'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: _testingReminder ? null : _testReminder,
+                      icon: _testingReminder
+                          ? const SizedBox.square(
+                              dimension: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(
+                              Icons.notifications_active_outlined,
+                              size: 18,
+                            ),
+                      label: const Text('提醒测试'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          Text('优先级', style: Theme.of(context).textTheme.titleSmall),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            children: TodoPriority.values
+                .map(
+                  (value) => ChoiceChip(
+                    showCheckmark: false,
+                    label: Text(value.name.toUpperCase()),
+                    selected: _priority == value,
+                    onSelected: (_) => setState(() => _priority = value),
                   ),
-                  child: Row(
-                    children: [
-                      Icon(
-                        Icons.event_repeat_rounded,
-                        size: 20,
-                        color: Theme.of(context).colorScheme.primary,
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          _repeatHint!,
-                          style: Theme.of(context).textTheme.bodyMedium
-                              ?.copyWith(
-                                color: Theme.of(context)
-                                    .colorScheme
-                                    .onPrimaryContainer,
-                                fontWeight: FontWeight.w600,
-                              ),
+                )
+                .toList(),
+          ),
+          const SizedBox(height: 22),
+          Text('重复', style: Theme.of(context).textTheme.titleSmall),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: TodoRepeat.values
+                .map(
+                  (value) => ChoiceChip(
+                    showCheckmark: false,
+                    label: Text(_repeatLabel(value)),
+                    selected: _repeat == value,
+                    onSelected: (_) => setState(() {
+                      if (_repeat != value) _repeatScheduleChanged = true;
+                      _repeat = value;
+                    }),
+                  ),
+                )
+                .toList(),
+          ),
+          const SizedBox(height: 12),
+          AnimatedSwitcher(
+            duration: const Duration(milliseconds: 180),
+            child: _repeatHint == null
+                ? const SizedBox.shrink(key: ValueKey('repeat-hint-empty'))
+                : Container(
+                    key: ValueKey(_repeat),
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 12,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.primaryContainer,
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.event_repeat_rounded,
+                          size: 20,
+                          color: Theme.of(context).colorScheme.primary,
                         ),
-                      ),
-                    ],
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            _repeatHint!,
+                            style: Theme.of(context).textTheme.bodyMedium
+                                ?.copyWith(
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .onPrimaryContainer,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+          ),
+        ],
+      ),
+      bottomNavigationBar: widget.desktopDialog
+          ? DecoratedBox(
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surface,
+                border: Border(
+                  top: BorderSide(
+                    color: Theme.of(context).colorScheme.outlineVariant,
                   ),
                 ),
-        ),
-      ],
-    ),
-  );
+              ),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text('取消'),
+                    ),
+                    const SizedBox(width: 8),
+                    FilledButton(onPressed: _save, child: const Text('保存')),
+                  ],
+                ),
+              ),
+            )
+          : null,
+    );
+    if (!widget.desktopDialog) return scaffold;
+    return Dialog(
+      clipBehavior: Clip.antiAlias,
+      insetPadding: const EdgeInsets.all(24),
+      child: SizedBox(
+        width: 560,
+        height: math.min(MediaQuery.sizeOf(context).height * .8, 680),
+        child: scaffold,
+      ),
+    );
+  }
 }
 
 class CompletedTodosScreen extends StatelessWidget {

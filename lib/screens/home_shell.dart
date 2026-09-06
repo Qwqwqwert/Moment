@@ -1,12 +1,16 @@
 import 'dart:math';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show defaultTargetPlatform;
+import 'package:flutter/services.dart';
 
 import '../models/achievement.dart';
 import '../models/note.dart';
 import '../state/app_controller.dart';
+import '../theme/desktop_environment.dart';
 import '../widgets/note_card.dart';
 import 'note_editor_screen.dart';
+import 'note_library_screens.dart';
 import 'notes_home_screen.dart';
 import 'todos_screen.dart';
 
@@ -17,12 +21,32 @@ class HomeShell extends StatefulWidget {
   State<HomeShell> createState() => _HomeShellState();
 }
 
-class _HomeShellState extends State<HomeShell> {
-  static const _historyTodayChancePercent = 6;
+class _HomeShellState extends State<HomeShell>
+    with SingleTickerProviderStateMixin {
+  static const _historyTodayChancePercent = 100;
+  static const _pageTransitionDuration = Duration(milliseconds: 220);
 
   var _index = 0;
+  late final AnimationController _pageController;
+  bool _notesOffstage = false;
+  bool _todosOffstage = true;
   bool _historyTodayChecked = false;
   bool _achievementDialogActive = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _pageController = AnimationController(
+      vsync: this,
+      duration: _pageTransitionDuration,
+    );
+  }
+
+  @override
+  void dispose() {
+    _pageController.dispose();
+    super.dispose();
+  }
 
   @override
   void didChangeDependencies() {
@@ -74,45 +98,413 @@ class _HomeShellState extends State<HomeShell> {
     );
   }
 
+  void _createCurrentItem() {
+    final page = _index == 0
+        ? const NoteEditorScreen()
+        : TodoEditorScreen(initialDate: DateUtils.dateOnly(DateTime.now()));
+    Navigator.push<void>(context, MaterialPageRoute(builder: (_) => page));
+  }
+
+  void _openSearch() {
+    Navigator.push<void>(
+      context,
+      MaterialPageRoute(builder: (_) => const SearchNotesScreen()),
+    );
+  }
+
+  void _handleEscape() {
+    FocusManager.instance.primaryFocus?.unfocus();
+    final navigator = Navigator.of(context);
+    if (navigator.canPop()) navigator.maybePop();
+  }
+
+  Future<void> _selectPage(int index) async {
+    if (index == _index) return;
+    setState(() {
+      _index = index;
+      if (index == 0) {
+        _notesOffstage = false;
+      } else {
+        _todosOffstage = false;
+      }
+    });
+    await _pageController.animateTo(
+      index.toDouble(),
+      duration: _pageTransitionDuration,
+      curve: Curves.easeInOut,
+    );
+    if (!mounted || _index != index) return;
+    setState(() {
+      _notesOffstage = index != 0;
+      _todosOffstage = index != 1;
+    });
+  }
+
   @override
-  Widget build(BuildContext context) => Scaffold(
-    body: Stack(
-      fit: StackFit.expand,
-      children: [
-        _PageFade(visible: _index == 0, child: const NotesHomeScreen()),
-        _PageFade(visible: _index == 1, child: const TodosScreen()),
-      ],
+  Widget build(BuildContext context) {
+    if (defaultTargetPlatform == TargetPlatform.windows) {
+      return const _DesktopHomeShell();
+    }
+    return DesktopEnvironment.mobile(
+      child: CallbackShortcuts(
+        bindings: {
+          const SingleActivator(LogicalKeyboardKey.keyN, control: true):
+              _createCurrentItem,
+          const SingleActivator(LogicalKeyboardKey.keyF, control: true):
+              _openSearch,
+          const SingleActivator(LogicalKeyboardKey.digit1, control: true): () {
+            _selectPage(0);
+          },
+          const SingleActivator(LogicalKeyboardKey.digit2, control: true): () {
+            _selectPage(1);
+          },
+          const SingleActivator(LogicalKeyboardKey.escape): _handleEscape,
+        },
+        child: Scaffold(
+          body: AnimatedBuilder(
+            animation: _pageController,
+            builder: (context, _) => Stack(
+              fit: StackFit.expand,
+              children: [
+                _PageFade(
+                  opacity: 1 - _pageController.value,
+                  offstage: _notesOffstage,
+                  interactive: _index == 0,
+                  child: const NotesHomeScreen(),
+                ),
+                _PageFade(
+                  opacity: _pageController.value,
+                  offstage: _todosOffstage,
+                  interactive: _index == 1,
+                  child: const TodosScreen(),
+                ),
+              ],
+            ),
+          ),
+          bottomNavigationBar: Material(
+            color: Theme.of(context).colorScheme.surfaceContainer,
+            child: SafeArea(
+              top: false,
+              child: SizedBox(
+                height: 70,
+                child: Row(
+                  children: [
+                    _HomeDestination(
+                      key: const ValueKey('home-tab-notes'),
+                      icon: Icons.note_alt_outlined,
+                      selectedIcon: Icons.note_alt_rounded,
+                      label: '笔记',
+                      selected: _index == 0,
+                      onTap: () => _selectPage(0),
+                    ),
+                    _HomeDestination(
+                      key: const ValueKey('home-tab-todos'),
+                      icon: Icons.check_circle_outline_rounded,
+                      selectedIcon: Icons.check_circle_rounded,
+                      label: '待办',
+                      selected: _index == 1,
+                      onTap: () => _selectPage(1),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DesktopHomeShell extends StatefulWidget {
+  const _DesktopHomeShell();
+
+  @override
+  State<_DesktopHomeShell> createState() => _DesktopHomeShellState();
+}
+
+class _DesktopHomeShellState extends State<_DesktopHomeShell> {
+  final _notesNavigator = GlobalKey<NavigatorState>();
+  final _todosNavigator = GlobalKey<NavigatorState>();
+  DesktopModule _module = DesktopModule.notes;
+  bool _settingsOpen = false;
+
+  GlobalKey<NavigatorState> get _activeNavigator =>
+      _module == DesktopModule.notes ? _notesNavigator : _todosNavigator;
+
+  void _switchModule(DesktopModule module) {
+    if (_module == module) return;
+    if (_settingsOpen) _activeNavigator.currentState?.pop();
+    setState(() {
+      _settingsOpen = false;
+      _module = module;
+    });
+  }
+
+  void _openInWorkspace(Widget page) {
+    _activeNavigator.currentState?.push<void>(
+      MaterialPageRoute(builder: (_) => page),
+    );
+  }
+
+  void _createCurrent() {
+    if (_module == DesktopModule.notes) {
+      _openInWorkspace(const NoteEditorScreen());
+      return;
+    }
+    final navigatorContext = _activeNavigator.currentContext;
+    if (navigatorContext == null) return;
+    showDialog<void>(
+      context: navigatorContext,
+      builder: (_) => TodoEditorScreen(
+        initialDate: DateUtils.dateOnly(DateTime.now()),
+        desktopDialog: true,
+      ),
+    );
+  }
+
+  void _openSearch() {
+    _switchModule(DesktopModule.notes);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _notesNavigator.currentState?.push<void>(
+        MaterialPageRoute(builder: (_) => const SearchNotesScreen()),
+      );
+    });
+  }
+
+  Future<void> _openSettings() async {
+    if (_settingsOpen) return;
+    setState(() => _settingsOpen = true);
+    await _activeNavigator.currentState?.push<void>(
+      MaterialPageRoute(builder: (_) => const SettingsScreen()),
+    );
+    if (mounted) setState(() => _settingsOpen = false);
+  }
+
+  void _escape() {
+    FocusManager.instance.primaryFocus?.unfocus();
+    _activeNavigator.currentState?.maybePop();
+  }
+
+  @override
+  Widget build(BuildContext context) => DesktopEnvironment(
+    isDesktop: true,
+    module: _module,
+    switchModule: _switchModule,
+    openInWorkspace: _openInWorkspace,
+    child: CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.keyN, control: true):
+            _createCurrent,
+        const SingleActivator(LogicalKeyboardKey.keyF, control: true):
+            _openSearch,
+        const SingleActivator(LogicalKeyboardKey.digit1, control: true): () =>
+            _switchModule(DesktopModule.notes),
+        const SingleActivator(LogicalKeyboardKey.digit2, control: true): () =>
+            _switchModule(DesktopModule.todos),
+        const SingleActivator(LogicalKeyboardKey.escape): _escape,
+      },
+      child: Scaffold(
+        backgroundColor: Theme.of(context).colorScheme.surface,
+        body: Row(
+          children: [
+            SizedBox(
+              width: 88,
+              child: _DesktopNavigation(
+                module: _module,
+                settingsSelected: _settingsOpen,
+                onChanged: _switchModule,
+                onSettings: _openSettings,
+              ),
+            ),
+            const VerticalDivider(),
+            Expanded(
+              child: IndexedStack(
+                index: _module.index,
+                children: [
+                  Navigator(
+                    key: _notesNavigator,
+                    onGenerateRoute: (_) => MaterialPageRoute<void>(
+                      builder: (_) => const NotesHomeScreen(desktop: true),
+                    ),
+                  ),
+                  Navigator(
+                    key: _todosNavigator,
+                    onGenerateRoute: (_) => MaterialPageRoute<void>(
+                      builder: (_) => const TodosScreen(desktop: true),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
     ),
-    bottomNavigationBar: Material(
-      color: Theme.of(context).colorScheme.surfaceContainer,
+  );
+}
+
+class _DesktopNavigation extends StatelessWidget {
+  const _DesktopNavigation({
+    required this.module,
+    required this.settingsSelected,
+    required this.onChanged,
+    required this.onSettings,
+  });
+
+  final DesktopModule module;
+  final bool settingsSelected;
+  final ValueChanged<DesktopModule> onChanged;
+  final VoidCallback onSettings;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return ColoredBox(
+      color: colors.surfaceContainerLow,
       child: SafeArea(
-        top: false,
-        child: SizedBox(
-          height: 70,
-          child: Row(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+          child: Column(
             children: [
-              _HomeDestination(
-                key: const ValueKey('home-tab-notes'),
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: colors.primary,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(
+                  Icons.auto_stories_rounded,
+                  color: colors.onPrimary,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Moment',
+                style: Theme.of(context).textTheme.labelSmall
+                    ?.copyWith(fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 28),
+              _DesktopNavItem(
+                key: const ValueKey('desktop-nav-notes'),
                 icon: Icons.note_alt_outlined,
                 selectedIcon: Icons.note_alt_rounded,
                 label: '笔记',
-                selected: _index == 0,
-                onTap: () => setState(() => _index = 0),
+                selected: module == DesktopModule.notes,
+                onTap: () => onChanged(DesktopModule.notes),
               ),
-              _HomeDestination(
-                key: const ValueKey('home-tab-todos'),
+              const SizedBox(height: 6),
+              _DesktopNavItem(
+                key: const ValueKey('desktop-nav-todos'),
                 icon: Icons.check_circle_outline_rounded,
                 selectedIcon: Icons.check_circle_rounded,
                 label: '待办',
-                selected: _index == 1,
-                onTap: () => setState(() => _index = 1),
+                selected: module == DesktopModule.todos,
+                onTap: () => onChanged(DesktopModule.todos),
+              ),
+              const Spacer(),
+              _DesktopNavItem(
+                key: const ValueKey('desktop-nav-settings'),
+                icon: Icons.settings_outlined,
+                selectedIcon: Icons.settings_rounded,
+                label: '设置',
+                selected: settingsSelected,
+                onTap: onSettings,
               ),
             ],
           ),
         ),
       ),
-    ),
-  );
+    );
+  }
+}
+
+class _DesktopNavItem extends StatelessWidget {
+  const _DesktopNavItem({
+    super.key,
+    required this.icon,
+    required this.selectedIcon,
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final IconData selectedIcon;
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Semantics(
+      button: true,
+      selected: selected,
+      child: Tooltip(
+        message: label,
+        child: Material(
+          color: selected
+              ? colors.primaryContainer.withValues(alpha: .7)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(7),
+          child: InkWell(
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(7),
+            focusColor: colors.primaryContainer,
+            child: SizedBox(
+              height: 58,
+              child: Stack(
+                children: [
+                  if (selected)
+                    Positioned(
+                      left: 0,
+                      top: 15,
+                      bottom: 15,
+                      child: Container(
+                        width: 3,
+                        decoration: BoxDecoration(
+                          color: colors.primary,
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                    ),
+                  Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          selected ? selectedIcon : icon,
+                          size: 21,
+                          color: selected
+                              ? colors.primary
+                              : colors.onSurfaceVariant,
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          label,
+                          style: Theme.of(context).textTheme.labelSmall
+                              ?.copyWith(
+                                color: selected
+                                    ? colors.primary
+                                    : colors.onSurfaceVariant,
+                                fontWeight: selected
+                                    ? FontWeight.w700
+                                    : FontWeight.w500,
+                              ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _AchievementUnlockedDialog extends StatelessWidget {
@@ -261,19 +653,27 @@ class _HistoryTodayDialog extends StatelessWidget {
 }
 
 class _PageFade extends StatelessWidget {
-  const _PageFade({required this.visible, required this.child});
+  const _PageFade({
+    required this.opacity,
+    required this.offstage,
+    required this.interactive,
+    required this.child,
+  });
 
-  final bool visible;
+  final double opacity;
+  final bool offstage;
+  final bool interactive;
   final Widget child;
 
   @override
-  Widget build(BuildContext context) => IgnorePointer(
-    ignoring: !visible,
-    child: AnimatedOpacity(
-      opacity: visible ? 1 : 0,
-      duration: const Duration(milliseconds: 220),
-      curve: Curves.easeInOut,
-      child: child,
+  Widget build(BuildContext context) => Offstage(
+    offstage: offstage,
+    child: TickerMode(
+      enabled: interactive,
+      child: IgnorePointer(
+        ignoring: !interactive,
+        child: Opacity(opacity: opacity.clamp(0, 1), child: child),
+      ),
     ),
   );
 }

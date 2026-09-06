@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
@@ -19,6 +18,7 @@ import 'package:video_player/video_player.dart';
 import '../models/note.dart';
 import '../services/ai_service.dart';
 import '../state/app_controller.dart';
+import '../theme/desktop_environment.dart';
 import '../utils/tag_name.dart';
 import '../widgets/markdown_code_block.dart';
 
@@ -38,7 +38,7 @@ class NoteEditorScreen extends StatefulWidget {
   final bool deleted;
   final bool historyPreview;
   final bool embedded;
-  final VoidCallback? onSaved;
+  final ValueChanged<String>? onSaved;
 
   @override
   State<NoteEditorScreen> createState() => _NoteEditorScreenState();
@@ -71,6 +71,8 @@ class _NoteEditorScreenState extends State<NoteEditorScreen>
   String _saveLabel = '新笔记';
   Timer? _saveTimer;
 
+  bool get _desktop => DesktopEnvironment.isDesktopOf(context);
+
   @override
   void initState() {
     super.initState();
@@ -94,6 +96,7 @@ class _NoteEditorScreenState extends State<NoteEditorScreen>
     _tags = [...?source?.tags];
     _favorite = source?.isFavorite ?? false;
     _markdownPreview = widget.readOnly || widget.historyPreview;
+    _app.pendingWork.register(_flushPendingSave);
     if (!widget.readOnly) {
       WidgetsBinding.instance.addPostFrameCallback(
         (_) => _recoverLostAttachments(),
@@ -105,6 +108,7 @@ class _NoteEditorScreenState extends State<NoteEditorScreen>
   void dispose() {
     _disposing = true;
     WidgetsBinding.instance.removeObserver(this);
+    _app.pendingWork.unregister(_flushPendingSave);
     _saveTimer?.cancel();
     if (!widget.readOnly && !_discarded && !_saveHandledForDispose) {
       _save();
@@ -334,10 +338,21 @@ class _NoteEditorScreenState extends State<NoteEditorScreen>
         _persisted = true;
       }
       _dirty = false;
-      widget.onSaved?.call();
+      widget.onSaved?.call(note.id);
     } finally {
       _saving = false;
       if (mounted && !_disposing) setState(() => _saveLabel = '已保存');
+    }
+  }
+
+  Future<void> _flushPendingSave() async {
+    _saveTimer?.cancel();
+    while (_saving) {
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    }
+    await _save();
+    while (_saving) {
+      await Future<void>.delayed(const Duration(milliseconds: 20));
     }
   }
 
@@ -365,7 +380,9 @@ class _NoteEditorScreenState extends State<NoteEditorScreen>
   }
 
   Future<void> _recoverLostAttachments() async {
-    final recovered = await _app.attachmentStore.recoverLost(_id);
+    final recovered = await _app.pendingWork.track(
+      _app.attachmentStore.recoverLost(_id),
+    );
     if ((recovered.images.isNotEmpty || recovered.videos.isNotEmpty) &&
         mounted) {
       setState(() {
@@ -379,7 +396,9 @@ class _NoteEditorScreenState extends State<NoteEditorScreen>
 
   Future<void> _pickImages() async {
     try {
-      final added = await _app.attachmentStore.pickAndStore(_id);
+      final added = await _app.pendingWork.track(
+        _app.attachmentStore.pickAndStore(_id),
+      );
       if (!mounted || added.isEmpty) return;
       final wasEmpty = _images.isEmpty;
       setState(() => _images = [..._images, ...added]);
@@ -402,7 +421,9 @@ class _NoteEditorScreenState extends State<NoteEditorScreen>
 
   Future<void> _pickVideo() async {
     try {
-      final added = await _app.attachmentStore.pickVideoAndStore(_id);
+      final added = await _app.pendingWork.track(
+        _app.attachmentStore.pickVideoAndStore(_id),
+      );
       if (!mounted || added == null) return;
       final wasEmpty = _videos.isEmpty;
       setState(() => _videos = [..._videos, added]);
@@ -425,37 +446,44 @@ class _NoteEditorScreenState extends State<NoteEditorScreen>
 
   Future<void> _chooseAttachment() async {
     FocusManager.instance.primaryFocus?.unfocus();
-    final action = await showModalBottomSheet<_AttachmentAction>(
-      context: context,
-      showDragHandle: true,
-      builder: (context) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.add_photo_alternate_outlined),
-              title: const Text('图片'),
-              onTap: () => Navigator.pop(context, _AttachmentAction.image),
-            ),
-            ListTile(
-              leading: const Icon(Icons.videocam_outlined),
-              title: const Text('视频'),
-              subtitle: _videos.length >= 9 ? const Text('最多添加 9 个视频') : null,
-              enabled: _videos.length < 9,
-              onTap: _videos.length >= 9
-                  ? null
-                  : () => Navigator.pop(context, _AttachmentAction.video),
-            ),
-            ListTile(
-              leading: const Icon(Icons.mic_none_rounded),
-              title: const Text('语音'),
-              onTap: () => Navigator.pop(context, _AttachmentAction.voice),
-            ),
-            const SizedBox(height: 8),
-          ],
-        ),
+    Widget choices(BuildContext context) => SafeArea(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ListTile(
+            leading: const Icon(Icons.add_photo_alternate_outlined),
+            title: const Text('图片'),
+            onTap: () => Navigator.pop(context, _AttachmentAction.image),
+          ),
+          ListTile(
+            leading: const Icon(Icons.videocam_outlined),
+            title: const Text('视频'),
+            subtitle: _videos.length >= 9 ? const Text('最多添加 9 个视频') : null,
+            enabled: _videos.length < 9,
+            onTap: _videos.length >= 9
+                ? null
+                : () => Navigator.pop(context, _AttachmentAction.video),
+          ),
+          ListTile(
+            leading: const Icon(Icons.mic_none_rounded),
+            title: const Text('语音'),
+            onTap: () => Navigator.pop(context, _AttachmentAction.voice),
+          ),
+          const SizedBox(height: 8),
+        ],
       ),
     );
+    final action = _desktop
+        ? await showDialog<_AttachmentAction>(
+            context: context,
+            builder: (context) =>
+                Dialog(child: SizedBox(width: 400, child: choices(context))),
+          )
+        : await showModalBottomSheet<_AttachmentAction>(
+            context: context,
+            showDragHandle: true,
+            builder: choices,
+          );
     if (!mounted || action == null) return;
     switch (action) {
       case _AttachmentAction.image:
@@ -472,28 +500,35 @@ class _NoteEditorScreenState extends State<NoteEditorScreen>
 
   Future<void> _chooseVoice() async {
     FocusManager.instance.primaryFocus?.unfocus();
-    final action = await showModalBottomSheet<_VoiceAction>(
-      context: context,
-      showDragHandle: true,
-      builder: (context) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.mic_rounded),
-              title: const Text('录制语音'),
-              onTap: () => Navigator.pop(context, _VoiceAction.record),
-            ),
-            ListTile(
-              leading: const Icon(Icons.audio_file_outlined),
-              title: const Text('导入现有语音'),
-              onTap: () => Navigator.pop(context, _VoiceAction.import),
-            ),
-            const SizedBox(height: 8),
-          ],
-        ),
+    Widget choices(BuildContext context) => SafeArea(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ListTile(
+            leading: const Icon(Icons.mic_rounded),
+            title: const Text('录制语音'),
+            onTap: () => Navigator.pop(context, _VoiceAction.record),
+          ),
+          ListTile(
+            leading: const Icon(Icons.audio_file_outlined),
+            title: const Text('导入现有语音'),
+            onTap: () => Navigator.pop(context, _VoiceAction.import),
+          ),
+          const SizedBox(height: 8),
+        ],
       ),
     );
+    final action = _desktop
+        ? await showDialog<_VoiceAction>(
+            context: context,
+            builder: (context) =>
+                Dialog(child: SizedBox(width: 400, child: choices(context))),
+          )
+        : await showModalBottomSheet<_VoiceAction>(
+            context: context,
+            showDragHandle: true,
+            builder: choices,
+          );
     if (!mounted || action == null) return;
     switch (action) {
       case _VoiceAction.record:
@@ -516,20 +551,33 @@ class _NoteEditorScreenState extends State<NoteEditorScreen>
       }
       final path = await _app.attachmentStore.createAudioRecordingPath(_id);
       if (!mounted) return;
-      final recordedPath = await showModalBottomSheet<String>(
-        context: context,
-        isDismissible: false,
-        enableDrag: false,
-        showDragHandle: true,
-        builder: (context) =>
-            _VoiceRecorderSheet(recorder: recorder, path: path),
-      );
+      final recordedPath = _desktop
+          ? await showDialog<String>(
+              context: context,
+              barrierDismissible: false,
+              builder: (context) => Dialog(
+                child: SizedBox(
+                  width: 430,
+                  child: _VoiceRecorderSheet(recorder: recorder, path: path),
+                ),
+              ),
+            )
+          : await showModalBottomSheet<String>(
+              context: context,
+              isDismissible: false,
+              enableDrag: false,
+              showDragHandle: true,
+              builder: (context) =>
+                  _VoiceRecorderSheet(recorder: recorder, path: path),
+            );
       if (!mounted || recordedPath == null) return;
       setState(() => _audio = [..._audio, recordedPath]);
       _dirty = true;
       await _save();
     } catch (error) {
-      _showActionMessage('录制语音失败：$error');
+      _showActionMessage(
+        _desktop ? '录制语音失败，请检查 Windows 设置中的麦克风隐私权限：$error' : '录制语音失败：$error',
+      );
     } finally {
       await recorder.dispose();
     }
@@ -537,7 +585,9 @@ class _NoteEditorScreenState extends State<NoteEditorScreen>
 
   Future<void> _importVoice() async {
     try {
-      final path = await _app.attachmentStore.importAudioAndStore(_id);
+      final path = await _app.pendingWork.track(
+        _app.attachmentStore.importAudioAndStore(_id),
+      );
       if (!mounted || path == null) return;
       setState(() => _audio = [..._audio, path]);
       _dirty = true;
@@ -548,17 +598,24 @@ class _NoteEditorScreenState extends State<NoteEditorScreen>
   }
 
   Future<void> _chooseTags() async {
-    final selected = await showModalBottomSheet<List<String>>(
-      context: context,
-      isScrollControlled: true,
-      showDragHandle: true,
-      builder: (_) => _TagPickerSheet(
-        app: _app,
-        initialSelected: _tags,
-        noteTitle: _titleController.text,
-        noteContent: _contentController.text,
-      ),
+    Widget picker(BuildContext context) => _TagPickerSheet(
+      app: _app,
+      initialSelected: _tags,
+      noteTitle: _titleController.text,
+      noteContent: _contentController.text,
     );
+    final selected = _desktop
+        ? await showDialog<List<String>>(
+            context: context,
+            builder: (context) =>
+                Dialog(child: SizedBox(width: 540, child: picker(context))),
+          )
+        : await showModalBottomSheet<List<String>>(
+            context: context,
+            isScrollControlled: true,
+            showDragHandle: true,
+            builder: picker,
+          );
     if (!mounted || selected == null) return;
     if (listEquals(_tags, selected)) return;
     setState(() => _tags = selected);
@@ -798,35 +855,44 @@ class _NoteEditorScreenState extends State<NoteEditorScreen>
       ),
     );
 
-    final body = PopScope(
-      canPop: widget.embedded,
-      onPopInvokedWithResult: (didPop, result) => _handleSystemBack(didPop),
-      child: Column(
-        children: [
-          if (widget.embedded)
-            _EditorToolbar(
-              readOnly: widget.readOnly,
-              favorite: _favorite,
-              saveLabel: _saveLabel,
-              markdownPreview: _markdownPreview,
-              onMarkdownPreview: () => _setMarkdownPreview(!_markdownPreview),
-              onFavorite: _toggleFavorite,
-              onShareExport: _handleShareExportAction,
-              onDelete: _delete,
-            ),
-          Expanded(child: editor),
-          if (widget.embedded && !widget.readOnly)
-            AnimatedSwitcher(
-              duration: const Duration(milliseconds: 180),
-              child: _markdownPreview
-                  ? const SizedBox.shrink(key: ValueKey('preview-bottom-bar'))
-                  : _EditorBottomBar(
-                      key: const ValueKey('edit-bottom-bar'),
-                      onTags: _chooseTags,
-                      onAdd: _chooseAttachment,
-                    ),
-            ),
-        ],
+    final body = CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.keyS, control: true): () {
+          unawaited(_flushPendingSave());
+        },
+      },
+      child: PopScope(
+        canPop: widget.embedded,
+        onPopInvokedWithResult: (didPop, result) => _handleSystemBack(didPop),
+        child: Column(
+          children: [
+            if (widget.embedded)
+              _EditorToolbar(
+                readOnly: widget.readOnly,
+                favorite: _favorite,
+                saveLabel: _saveLabel,
+                markdownPreview: _markdownPreview,
+                onMarkdownPreview: () => _setMarkdownPreview(!_markdownPreview),
+                onFavorite: _toggleFavorite,
+                onTags: _chooseTags,
+                onAdd: _chooseAttachment,
+                onShareExport: _handleShareExportAction,
+                onDelete: _delete,
+              ),
+            Expanded(child: editor),
+            if (widget.embedded && !widget.readOnly && !_desktop)
+              AnimatedSwitcher(
+                duration: const Duration(milliseconds: 180),
+                child: _markdownPreview
+                    ? const SizedBox.shrink(key: ValueKey('preview-bottom-bar'))
+                    : _EditorBottomBar(
+                        key: const ValueKey('edit-bottom-bar'),
+                        onTags: _chooseTags,
+                        onAdd: _chooseAttachment,
+                      ),
+              ),
+          ],
+        ),
       ),
     );
     if (widget.embedded) {
@@ -854,6 +920,18 @@ class _NoteEditorScreenState extends State<NoteEditorScreen>
           ),
         ),
         actions: [
+          if (_desktop && !widget.readOnly) ...[
+            TextButton.icon(
+              onPressed: _chooseTags,
+              icon: const Icon(Icons.label_outline_rounded, size: 18),
+              label: const Text('标签'),
+            ),
+            TextButton.icon(
+              onPressed: _chooseAttachment,
+              icon: const Icon(Icons.add_rounded, size: 18),
+              label: const Text('添加'),
+            ),
+          ],
           if (!widget.readOnly)
             IconButton(
               tooltip: _markdownPreview ? '继续编辑' : '预览 Markdown',
@@ -890,15 +968,22 @@ class _NoteEditorScreenState extends State<NoteEditorScreen>
       body: body,
       bottomNavigationBar: widget.readOnly
           ? null
-          : AnimatedSwitcher(
-              duration: const Duration(milliseconds: 180),
-              child: _markdownPreview
-                  ? const SizedBox.shrink(key: ValueKey('preview-bottom-bar'))
-                  : _EditorBottomBar(
-                      key: const ValueKey('edit-bottom-bar'),
-                      onTags: _chooseTags,
-                      onAdd: _chooseAttachment,
-                    ),
+          : _desktop
+          ? null
+          : Padding(
+              padding: EdgeInsets.only(
+                bottom: MediaQuery.viewInsetsOf(context).bottom,
+              ),
+              child: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 180),
+                child: _markdownPreview
+                    ? const SizedBox.shrink(key: ValueKey('preview-bottom-bar'))
+                    : _EditorBottomBar(
+                        key: const ValueKey('edit-bottom-bar'),
+                        onTags: _chooseTags,
+                        onAdd: _chooseAttachment,
+                      ),
+              ),
             ),
     );
   }
@@ -1348,7 +1433,10 @@ class _VideoPlayerPageState extends State<_VideoPlayerPage> {
       future: _initialize,
       builder: (context, snapshot) {
         if (snapshot.hasError) {
-          return const Text('视频无法播放', style: TextStyle(color: Colors.white));
+          return const Text(
+            '视频无法播放，系统可能缺少对应解码器',
+            style: TextStyle(color: Colors.white),
+          );
         }
         if (snapshot.connectionState != ConnectionState.done) {
           return const CircularProgressIndicator();
@@ -2029,6 +2117,8 @@ class _EditorToolbar extends StatelessWidget {
     required this.markdownPreview,
     required this.onMarkdownPreview,
     required this.onFavorite,
+    required this.onTags,
+    required this.onAdd,
     required this.onShareExport,
     required this.onDelete,
   });
@@ -2038,62 +2128,82 @@ class _EditorToolbar extends StatelessWidget {
   final bool markdownPreview;
   final VoidCallback onMarkdownPreview;
   final VoidCallback onFavorite;
+  final VoidCallback onTags;
+  final VoidCallback onAdd;
   final ValueChanged<_NoteShareExportAction> onShareExport;
   final VoidCallback onDelete;
 
   @override
-  Widget build(BuildContext context) => Container(
-    height: 64,
-    padding: const EdgeInsets.symmetric(horizontal: 16),
-    decoration: BoxDecoration(
-      color: Theme.of(context).colorScheme.surface,
-      border: Border(
-        bottom: BorderSide(
-          color: Theme.of(context).colorScheme.outlineVariant
-              .withValues(alpha: .4),
+  Widget build(BuildContext context) {
+    final desktop = DesktopEnvironment.isDesktopOf(context);
+    return Container(
+      height: desktop ? 56 : 64,
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        border: Border(
+          bottom: BorderSide(
+            color: Theme.of(context).colorScheme.outlineVariant
+                .withValues(alpha: .4),
+          ),
         ),
       ),
-    ),
-    child: Row(
-      children: [
-        Text(
-          readOnly ? '只读预览' : (markdownPreview ? 'Markdown 预览' : saveLabel),
-          style: Theme.of(context).textTheme.labelLarge
-              ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
-        ),
-        const Spacer(),
-        if (!readOnly)
-          IconButton(
-            tooltip: markdownPreview ? '继续编辑' : '预览 Markdown',
-            onPressed: onMarkdownPreview,
-            icon: AnimatedSwitcher(
-              duration: const Duration(milliseconds: 180),
-              child: Icon(
-                markdownPreview
-                    ? Icons.edit_outlined
-                    : Icons.visibility_outlined,
-                key: ValueKey(markdownPreview),
+      child: Row(
+        children: [
+          Text(
+            readOnly ? '只读预览' : (markdownPreview ? 'Markdown 预览' : saveLabel),
+            style: Theme.of(context).textTheme.labelLarge?.copyWith(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const Spacer(),
+          if (!readOnly && desktop) ...[
+            TextButton.icon(
+              onPressed: onTags,
+              icon: const Icon(Icons.label_outline_rounded, size: 18),
+              label: const Text('标签'),
+            ),
+            const SizedBox(width: 4),
+            TextButton.icon(
+              onPressed: onAdd,
+              icon: const Icon(Icons.add_rounded, size: 18),
+              label: const Text('添加'),
+            ),
+            const SizedBox(width: 4),
+          ],
+          if (!readOnly)
+            IconButton(
+              tooltip: markdownPreview ? '继续编辑' : '预览 Markdown',
+              onPressed: onMarkdownPreview,
+              icon: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 180),
+                child: Icon(
+                  markdownPreview
+                      ? Icons.edit_outlined
+                      : Icons.visibility_outlined,
+                  key: ValueKey(markdownPreview),
+                ),
               ),
             ),
-          ),
-        _ShareExportMenu(onSelected: onShareExport),
-        if (!readOnly)
-          IconButton(
-            tooltip: favorite ? '取消收藏' : '收藏',
-            onPressed: onFavorite,
-            icon: Icon(
-              favorite ? Icons.star_rounded : Icons.star_outline_rounded,
+          _ShareExportMenu(onSelected: onShareExport),
+          if (!readOnly)
+            IconButton(
+              tooltip: favorite ? '取消收藏' : '收藏',
+              onPressed: onFavorite,
+              icon: Icon(
+                favorite ? Icons.star_rounded : Icons.star_outline_rounded,
+              ),
             ),
-          ),
-        if (!readOnly)
-          IconButton(
-            tooltip: '删除',
-            onPressed: onDelete,
-            icon: const Icon(Icons.delete_outline_rounded),
-          ),
-      ],
-    ),
-  );
+          if (!readOnly)
+            IconButton(
+              tooltip: '删除',
+              onPressed: onDelete,
+              icon: const Icon(Icons.delete_outline_rounded),
+            ),
+        ],
+      ),
+    );
+  }
 }
 
 class _EditorBottomBar extends StatelessWidget {

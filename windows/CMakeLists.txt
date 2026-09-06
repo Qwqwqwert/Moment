@@ -32,6 +32,14 @@ set(CMAKE_CXX_FLAGS_PROFILE "${CMAKE_CXX_FLAGS_RELEASE}")
 # Use Unicode for all projects.
 add_definitions(-DUNICODE -D_UNICODE)
 
+# Windows plugin sources are UTF-8. Newer MSVC releases otherwise interpret
+# them using the machine's legacy code page and promote C4819 to an error.
+add_compile_options(/utf-8)
+
+# just_audio_windows currently uses the compatibility coroutine header. MSVC
+# 14.51 requires this opt-in until the plugin migrates to C++20 coroutines.
+add_definitions(-D_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS)
+
 # Compilation settings that should be applied to most targets.
 #
 # Be cautious about adding new options here, as plugins use this function by

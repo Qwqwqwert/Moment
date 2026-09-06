@@ -29,10 +29,15 @@ class AiSettingsStore {
 
   Future<AiConfig> load() async {
     try {
+      final values = await Future.wait([
+        _storage.read(key: _baseUrlKey),
+        _storage.read(key: _modelKey),
+        _storage.read(key: _apiKeyKey),
+      ]).timeout(const Duration(seconds: 2));
       return AiConfig(
-        baseUrl: await _storage.read(key: _baseUrlKey) ?? '',
-        model: await _storage.read(key: _modelKey) ?? '',
-        apiKey: await _storage.read(key: _apiKeyKey) ?? '',
+        baseUrl: values[0] ?? '',
+        model: values[1] ?? '',
+        apiKey: values[2] ?? '',
       );
     } catch (_) {
       return const AiConfig();
@@ -51,10 +56,8 @@ class AiService {
 
   final AiConfig config;
 
-  Future<String> singleTurn(String message) => _chat(
-    system: '你是 Moment 的 AI 调用测试助手。请直接、简洁地回答用户消息。',
-    user: message,
-  );
+  Future<String> singleTurn(String message) =>
+      _chat(system: '你是 Moment 的 AI 调用测试助手。请直接、简洁地回答用户消息。', user: message);
 
   Future<List<String>> generateTags({
     required String title,

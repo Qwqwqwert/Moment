@@ -9,7 +9,9 @@ import 'note_library_screens.dart';
 enum _SortMode { updated, created }
 
 class NotesHomeScreen extends StatefulWidget {
-  const NotesHomeScreen({super.key});
+  const NotesHomeScreen({super.key, this.desktop = false});
+
+  final bool desktop;
 
   @override
   State<NotesHomeScreen> createState() => _NotesHomeScreenState();
@@ -21,6 +23,7 @@ class _NotesHomeScreenState extends State<NotesHomeScreen> {
   _SortMode _sortMode = _SortMode.updated;
   bool _selectionMode = false;
   String? _wideNoteId;
+  String? _wideActiveNoteId;
 
   List<Note> _visibleNotes(AppController app) {
     final result = app.notes.where((note) {
@@ -44,7 +47,10 @@ class _NotesHomeScreenState extends State<NotesHomeScreen> {
       return;
     }
     if (wide) {
-      setState(() => _wideNoteId = id ?? 'new:${newId()}');
+      setState(() {
+        _wideNoteId = id ?? 'new:${newId()}';
+        _wideActiveNoteId = id;
+      });
     } else {
       Navigator.push<void>(
         context,
@@ -107,11 +113,12 @@ class _NotesHomeScreenState extends State<NotesHomeScreen> {
     final notes = _visibleNotes(app);
     return LayoutBuilder(
       builder: (context, constraints) {
-        final wide = constraints.maxWidth >= 840;
+        final wide = widget.desktop || constraints.maxWidth >= 840;
+        final editorSessionId = _wideNoteId;
         final list = _buildList(app, notes, wide);
         return Scaffold(
           appBar: AppBar(
-            toolbarHeight: 78,
+            toolbarHeight: widget.desktop ? 56 : 78,
             automaticallyImplyLeading: false,
             leading: _selectionMode
                 ? IconButton(
@@ -125,7 +132,7 @@ class _NotesHomeScreenState extends State<NotesHomeScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Text('Moment'),
+                      Text(widget.desktop ? '笔记' : 'Moment'),
                       const SizedBox(height: 2),
                       Text(
                         notes.isEmpty ? '记录此刻的想法' : '${notes.length} 条笔记',
@@ -146,6 +153,14 @@ class _NotesHomeScreenState extends State<NotesHomeScreen> {
                       }),
                       child: const Text('全选'),
                     ),
+                    if (widget.desktop)
+                      IconButton(
+                        tooltip: '删除所选笔记',
+                        onPressed: _selectedIds.isEmpty
+                            ? null
+                            : _deleteSelected,
+                        icon: const Icon(Icons.delete_outline_rounded),
+                      ),
                   ]
                 : [
                     IconButton.filledTonal(
@@ -172,58 +187,92 @@ class _NotesHomeScreenState extends State<NotesHomeScreen> {
                       },
                       onNavigate: _openDestination,
                     ),
+                    if (widget.desktop) ...[
+                      const SizedBox(width: 8),
+                      FilledButton.icon(
+                        onPressed: () => _openNote(null, true),
+                        icon: const Icon(Icons.add_rounded, size: 18),
+                        label: const Text('新建笔记'),
+                      ),
+                    ],
                     const SizedBox(width: 10),
                   ],
           ),
           body: wide
               ? Row(
                   children: [
-                    SizedBox(width: 400, child: list),
+                    SizedBox(
+                      width: widget.desktop
+                          ? (constraints.maxWidth < 1040 ? 310 : 360)
+                          : 400,
+                      child: ColoredBox(
+                        color: Theme.of(context)
+                            .colorScheme
+                            .surfaceContainerLowest,
+                        child: list,
+                      ),
+                    ),
                     const VerticalDivider(width: 1),
                     Expanded(
-                      child: _wideNoteId == null
+                      child: editorSessionId == null
                           ? const _WidePlaceholder()
                           : NoteEditorScreen(
-                              key: ValueKey(_wideNoteId),
-                              noteId: _wideNoteId!.startsWith('new:')
+                              key: ValueKey(editorSessionId),
+                              noteId: editorSessionId.startsWith('new:')
                                   ? null
-                                  : _wideNoteId,
+                                  : editorSessionId,
                               embedded: true,
-                              onSaved: () {},
+                              onSaved: (savedNoteId) {
+                                if (!mounted ||
+                                    _wideNoteId != editorSessionId ||
+                                    _wideActiveNoteId == savedNoteId) {
+                                  return;
+                                }
+                                setState(() => _wideActiveNoteId = savedNoteId);
+                              },
                             ),
                     ),
                   ],
                 )
               : list,
-          floatingActionButton: AnimatedSwitcher(
-            duration: const Duration(milliseconds: 240),
-            reverseDuration: const Duration(milliseconds: 200),
-            switchInCurve: Curves.easeOutBack,
-            switchOutCurve: Curves.easeInCubic,
-            transitionBuilder: (child, animation) => FadeTransition(
-              opacity: animation,
-              child: ScaleTransition(
-                scale: Tween<double>(begin: .82, end: 1).animate(animation),
-                child: child,
-              ),
-            ),
-            child: _selectionMode
-                ? FloatingActionButton(
-                    key: const ValueKey('delete-selected-notes'),
-                    heroTag: 'notes-delete-action',
-                    onPressed: _selectedIds.isEmpty ? null : _deleteSelected,
-                    backgroundColor: Theme.of(context).colorScheme.error,
-                    foregroundColor: Theme.of(context).colorScheme.onError,
-                    child: const Icon(Icons.delete_outline),
-                  )
-                : FloatingActionButton(
-                    key: const ValueKey('create-note'),
-                    heroTag: 'notes-create-action',
-                    onPressed: () => _openNote(null, wide),
-                    tooltip: '新建笔记',
-                    child: const Icon(Icons.edit_rounded),
+          floatingActionButton: widget.desktop
+              ? null
+              : AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 240),
+                  reverseDuration: const Duration(milliseconds: 200),
+                  switchInCurve: Curves.easeOutBack,
+                  switchOutCurve: Curves.easeInCubic,
+                  transitionBuilder: (child, animation) => FadeTransition(
+                    opacity: animation,
+                    child: ScaleTransition(
+                      scale: Tween<double>(
+                        begin: .82,
+                        end: 1,
+                      ).animate(animation),
+                      child: child,
+                    ),
                   ),
-          ),
+                  child: _selectionMode
+                      ? FloatingActionButton(
+                          key: const ValueKey('delete-selected-notes'),
+                          heroTag: 'notes-delete-action',
+                          onPressed: _selectedIds.isEmpty
+                              ? null
+                              : _deleteSelected,
+                          backgroundColor: Theme.of(context).colorScheme.error,
+                          foregroundColor: Theme.of(context)
+                              .colorScheme
+                              .onError,
+                          child: const Icon(Icons.delete_outline),
+                        )
+                      : FloatingActionButton(
+                          key: const ValueKey('create-note'),
+                          heroTag: 'notes-create-action',
+                          onPressed: () => _openNote(null, wide),
+                          tooltip: '新建笔记',
+                          child: const Icon(Icons.edit_rounded),
+                        ),
+                ),
         );
       },
     );
@@ -253,7 +302,12 @@ class _NotesHomeScreenState extends State<NotesHomeScreen> {
             final note = notes[index];
             return NoteCard(
               note: note,
+              compact: widget.desktop,
               selected: _selectedIds.contains(note.id),
+              active:
+                  widget.desktop &&
+                  !_selectionMode &&
+                  _wideActiveNoteId == note.id,
               onTap: () => _openNote(note.id, wide),
               onLongPress: () => _enterSelection(note.id),
             );

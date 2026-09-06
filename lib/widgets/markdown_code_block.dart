@@ -79,20 +79,14 @@ class MarkdownCodeBlockBuilder extends MarkdownElementBuilder {
     hl.highlight.registerLanguage('dart', dart_language.dart);
     hl.highlight.registerLanguage('go', go_language.go);
     hl.highlight.registerLanguage('java', java_language.java);
-    hl.highlight.registerLanguage(
-      'javascript',
-      javascript_language.javascript,
-    );
+    hl.highlight.registerLanguage('javascript', javascript_language.javascript);
     hl.highlight.registerLanguage('json', json_language.json);
     hl.highlight.registerLanguage('kotlin', kotlin_language.kotlin);
     hl.highlight.registerLanguage('python', python_language.python);
     hl.highlight.registerLanguage('rust', rust_language.rust);
     hl.highlight.registerLanguage('sql', sql_language.sql);
     hl.highlight.registerLanguage('swift', swift_language.swift);
-    hl.highlight.registerLanguage(
-      'typescript',
-      typescript_language.typescript,
-    );
+    hl.highlight.registerLanguage('typescript', typescript_language.typescript);
     hl.highlight.registerLanguage('xml', xml_language.xml);
     hl.highlight.registerLanguage('yaml', yaml_language.yaml);
     _languagesRegistered = true;
@@ -151,10 +145,7 @@ class MarkdownCodeBlockBuilder extends MarkdownElementBuilder {
     if (language == null) return TextSpan(text: source, style: baseStyle);
     try {
       final nodes = hl.highlight.parse(source, language: language).nodes;
-      return TextSpan(
-        style: baseStyle,
-        children: _spansFor(nodes, baseStyle),
-      );
+      return TextSpan(style: baseStyle, children: _spansFor(nodes, baseStyle));
     } catch (_) {
       return TextSpan(text: source, style: baseStyle);
     }
@@ -178,15 +169,20 @@ class MarkdownCodeBlockBuilder extends MarkdownElementBuilder {
     final color = switch (name) {
       'comment' || 'quote' => const Color(0xFF6B7280),
       'keyword' || 'selector-tag' || 'section' => const Color(0xFF7C3AED),
-      'string' || 'regexp' || 'addition' || 'meta-string' =>
-        const Color(0xFF16823C),
+      'string' ||
+      'regexp' ||
+      'addition' ||
+      'meta-string' => const Color(0xFF16823C),
       'number' || 'literal' => const Color(0xFF1565C0),
-      'title' || 'title.function' || 'title.class' || 'name' =>
-        const Color(0xFF00796B),
-      'attr' || 'attribute' || 'variable' || 'template-variable' =>
-        const Color(0xFFC2410C),
-      'built_in' || 'type' || 'symbol' || 'bullet' =>
-        const Color(0xFFB42318),
+      'title' ||
+      'title.function' ||
+      'title.class' ||
+      'name' => const Color(0xFF00796B),
+      'attr' ||
+      'attribute' ||
+      'variable' ||
+      'template-variable' => const Color(0xFFC2410C),
+      'built_in' || 'type' || 'symbol' || 'bullet' => const Color(0xFFB42318),
       'meta' || 'doctag' || 'link' => const Color(0xFF9C2C86),
       _ => baseStyle.color,
     };

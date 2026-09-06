@@ -6,9 +6,14 @@ list(APPEND FLUTTER_PLUGIN_LIST
   file_selector_windows
   flutter_secure_storage_windows
   flutter_timezone
+  just_audio_windows
   record_windows
+  screen_retriever_windows
   share_plus
   url_launcher_windows
+  video_player_win
+  window_manager
+  windows_single_instance
 )
 
 list(APPEND FLUTTER_FFI_PLUGIN_LIST

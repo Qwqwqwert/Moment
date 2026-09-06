@@ -3,12 +3,18 @@ import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path/path.dart' as p;
-import 'package:path_provider/path_provider.dart';
+
+import '../services/platform_storage.dart';
 
 class AttachmentStore {
-  AttachmentStore({ImagePicker? picker}) : _picker = picker ?? ImagePicker();
+  AttachmentStore({ImagePicker? picker, this.rootDirectory})
+    : _picker = picker ?? ImagePicker();
 
   final ImagePicker _picker;
+  final Directory? rootDirectory;
+
+  Future<Directory> _root() async =>
+      rootDirectory ?? await momentDataDirectory();
 
   Future<List<String>> pickAndStore(String noteId) async {
     final picked = await _picker.pickMultiImage();
@@ -16,7 +22,13 @@ class AttachmentStore {
   }
 
   Future<String?> pickVideoAndStore(String noteId) async {
-    final picked = await _picker.pickVideo(source: ImageSource.gallery);
+    final XFile? picked;
+    if (Platform.isWindows) {
+      final result = await FilePicker.pickFile(type: FileType.video);
+      picked = result?.xFile;
+    } else {
+      picked = await _picker.pickVideo(source: ImageSource.gallery);
+    }
     if (picked == null) return null;
     final stored = await _storeFiles(noteId, 'videos', [picked]);
     return stored.single;
@@ -37,10 +49,8 @@ class AttachmentStore {
     String noteId, {
     String extension = '.m4a',
   }) async {
-    final documents = await getApplicationDocumentsDirectory();
-    final directory = Directory(
-      p.join(documents.path, 'moment', 'audio', noteId),
-    );
+    final root = await _root();
+    final directory = Directory(p.join(root.path, 'audio', noteId));
     await directory.create(recursive: true);
     return p.join(
       directory.path,
@@ -49,6 +59,7 @@ class AttachmentStore {
   }
 
   Future<RecoveredAttachments> recoverLost(String noteId) async {
+    if (!Platform.isAndroid) return const RecoveredAttachments();
     final response = await _picker.retrieveLostData();
     final files = response.files ?? [if (response.file != null) response.file!];
     if (response.isEmpty || files.isEmpty) {
@@ -69,8 +80,8 @@ class AttachmentStore {
     String kind,
     Iterable<XFile> files,
   ) async {
-    final documents = await getApplicationDocumentsDirectory();
-    final directory = Directory(p.join(documents.path, 'moment', kind, noteId));
+    final root = await _root();
+    final directory = Directory(p.join(root.path, kind, noteId));
     await directory.create(recursive: true);
     final result = <String>[];
     for (final source in files) {

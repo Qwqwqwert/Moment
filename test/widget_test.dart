@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:moment/data/note_repository.dart';
 import 'package:moment/data/todo_repository.dart';
@@ -58,6 +59,106 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('购买牛奶'), findsOneWidget);
+  });
+
+  testWidgets('bottom navigation survives rapid repeated switching', (
+    tester,
+  ) async {
+    final repository = FakeNoteRepository();
+    await tester.pumpWidget(MomentApp(repository: repository));
+    await tester.pumpAndSettle();
+
+    final notesTab = find.byKey(const ValueKey('home-tab-notes'));
+    final todosTab = find.byKey(const ValueKey('home-tab-todos'));
+    await tester.tap(todosTab);
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.tap(notesTab);
+    await tester.pump(const Duration(milliseconds: 40));
+    await tester.tap(todosTab);
+    await tester.pumpAndSettle();
+
+    expect(find.text('待办'), findsWidgets);
+    expect(find.text('暂无待办'), findsOneWidget);
+
+    await tester.tap(notesTab);
+    await tester.pumpAndSettle();
+    expect(find.text('Moment'), findsOneWidget);
+    expect(find.text('开始记录你的想法'), findsOneWidget);
+  });
+
+  testWidgets('Windows desktop shell keeps navigation and opens todo dialog', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    await tester.binding.setSurfaceSize(const Size(1200, 760));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    final repository = FakeNoteRepository();
+    await tester.pumpWidget(MomentApp(repository: repository));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('desktop-nav-notes')), findsOneWidget);
+    expect(find.byKey(const ValueKey('desktop-nav-todos')), findsOneWidget);
+    expect(find.text('新建笔记'), findsOneWidget);
+    expect(find.byKey(const ValueKey('home-tab-notes')), findsNothing);
+
+    await tester.tap(find.byKey(const ValueKey('desktop-nav-todos')));
+    await tester.pumpAndSettle();
+    expect(find.text('新建待办'), findsOneWidget);
+    expect(find.text('7天内'), findsOneWidget);
+
+    await tester.tap(find.text('新建待办'));
+    await tester.pumpAndSettle();
+    expect(find.byType(Dialog), findsOneWidget);
+    expect(find.text('新建待办'), findsNWidgets(2));
+    expect(tester.takeException(), isNull);
+    debugDefaultTargetPlatformOverride = null;
+  });
+
+  testWidgets('Windows desktop layout fits the minimum window', (tester) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    await tester.binding.setSurfaceSize(const Size(900, 600));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    await tester.pumpWidget(MomentApp(repository: FakeNoteRepository()));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('desktop-nav-todos')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('待办'), findsWidgets);
+    expect(tester.takeException(), isNull);
+    debugDefaultTargetPlatformOverride = null;
+  });
+
+  testWidgets('Windows new note remains marked after its first save', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    await tester.binding.setSurfaceSize(const Size(1200, 760));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    final repository = FakeNoteRepository();
+    await tester.pumpWidget(MomentApp(repository: repository));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('新建笔记'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const Key('markdown-source-editor')),
+      '新建笔记内容',
+    );
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pumpAndSettle();
+
+    final notes = await repository.getNotes();
+    expect(notes, hasLength(1));
+    expect(
+      find.byKey(ValueKey('active-note-${notes.single.id}')),
+      findsOneWidget,
+    );
+    debugDefaultTargetPlatformOverride = null;
   });
 
   testWidgets('switches between Markdown source and preview', (tester) async {

@@ -5,9 +5,28 @@ import '../models/achievement.dart';
 import '../models/note.dart';
 import '../services/ai_service.dart';
 import '../state/app_controller.dart';
+import '../theme/desktop_environment.dart';
 import '../utils/tag_name.dart';
 import '../widgets/note_card.dart';
 import 'note_editor_screen.dart';
+
+Widget _desktopPageBody(
+  BuildContext context,
+  Widget child, {
+  double maxWidth = 900,
+}) {
+  if (!DesktopEnvironment.isDesktopOf(context)) return child;
+  return LayoutBuilder(
+    builder: (context, constraints) => Align(
+      alignment: Alignment.topCenter,
+      child: SizedBox(
+        width: constraints.maxWidth.clamp(0, maxWidth),
+        height: constraints.maxHeight,
+        child: child,
+      ),
+    ),
+  );
+}
 
 class SearchNotesScreen extends StatefulWidget {
   const SearchNotesScreen({super.key});
@@ -63,105 +82,108 @@ class _SearchNotesScreenState extends State<SearchNotesScreen> {
         : _results(app.notes);
     return Scaffold(
       appBar: AppBar(title: const Text('搜索笔记')),
-      body: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-            child: SearchBar(
-              controller: _query,
-              focusNode: _focusNode,
-              hintText: _naturalLanguage ? '描述你想查找的笔记' : '请输入关键词',
-              leading: const Icon(Icons.search),
-              onChanged: (_) => setState(() {
-                if (_naturalLanguage) _aiResults = const [];
-              }),
-              onSubmitted: (_) {
-                if (_naturalLanguage) _runNaturalSearch(app);
-              },
-              trailing: [
-                if (_naturalLanguage)
-                  IconButton(
-                    tooltip: '开始自然语言搜索',
-                    onPressed: _aiSearching
-                        ? null
-                        : () => _runNaturalSearch(app),
-                    icon: _aiSearching
-                        ? const SizedBox.square(
-                            dimension: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.auto_awesome_rounded),
-                  ),
-                IconButton(
-                  onPressed: _showDateFilter,
-                  icon: const Icon(Icons.tune),
-                ),
-              ],
-            ),
-          ),
-          if (app.aiConfig.isComplete)
+      body: _desktopPageBody(
+        context,
+        Column(
+          children: [
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: SegmentedButton<bool>(
-                segments: const [
-                  ButtonSegment(value: false, label: Text('关键词')),
-                  ButtonSegment(
-                    value: true,
-                    icon: Icon(Icons.auto_awesome_rounded),
-                    label: Text('自然语言'),
-                  ),
-                ],
-                selected: {_naturalLanguage},
-                onSelectionChanged: (value) => setState(() {
-                  _naturalLanguage = value.single;
-                  _aiResults = const [];
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+              child: SearchBar(
+                controller: _query,
+                focusNode: _focusNode,
+                hintText: _naturalLanguage ? '描述你想查找的笔记' : '请输入关键词',
+                leading: const Icon(Icons.search),
+                onChanged: (_) => setState(() {
+                  if (_naturalLanguage) _aiResults = const [];
                 }),
-              ),
-            ),
-          if (_start != null || _end != null)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Row(
-                children: [
-                  const Icon(Icons.date_range, size: 18),
-                  const SizedBox(width: 8),
-                  Text('${_format(_start)} — ${_format(_end)}'),
-                  const Spacer(),
-                  TextButton(
-                    onPressed: () => setState(() {
-                      _start = null;
-                      _end = null;
-                    }),
-                    child: const Text('清除'),
+                onSubmitted: (_) {
+                  if (_naturalLanguage) _runNaturalSearch(app);
+                },
+                trailing: [
+                  if (_naturalLanguage)
+                    IconButton(
+                      tooltip: '开始自然语言搜索',
+                      onPressed: _aiSearching
+                          ? null
+                          : () => _runNaturalSearch(app),
+                      icon: _aiSearching
+                          ? const SizedBox.square(
+                              dimension: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.auto_awesome_rounded),
+                    ),
+                  IconButton(
+                    onPressed: _showDateFilter,
+                    icon: const Icon(Icons.tune),
                   ),
                 ],
               ),
             ),
-          Expanded(
-            child: _aiSearching
-                ? const Center(child: CircularProgressIndicator())
-                : _query.text.trim().isEmpty
-                ? Center(
-                    child: Text(_naturalLanguage ? '描述你想查找的笔记' : '输入关键词搜索笔记'),
-                  )
-                : results.isEmpty
-                ? const Center(child: Text('未找到匹配的笔记'))
-                : ListView.builder(
-                    padding: const EdgeInsets.all(12),
-                    itemCount: results.length,
-                    itemBuilder: (context, index) => NoteCard(
-                      note: results[index],
-                      onTap: () => Navigator.push<void>(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) =>
-                              NoteEditorScreen(noteId: results[index].id),
+            if (app.aiConfig.isComplete)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: SegmentedButton<bool>(
+                  segments: const [
+                    ButtonSegment(value: false, label: Text('关键词')),
+                    ButtonSegment(
+                      value: true,
+                      icon: Icon(Icons.auto_awesome_rounded),
+                      label: Text('自然语言'),
+                    ),
+                  ],
+                  selected: {_naturalLanguage},
+                  onSelectionChanged: (value) => setState(() {
+                    _naturalLanguage = value.single;
+                    _aiResults = const [];
+                  }),
+                ),
+              ),
+            if (_start != null || _end != null)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Row(
+                  children: [
+                    const Icon(Icons.date_range, size: 18),
+                    const SizedBox(width: 8),
+                    Text('${_format(_start)} — ${_format(_end)}'),
+                    const Spacer(),
+                    TextButton(
+                      onPressed: () => setState(() {
+                        _start = null;
+                        _end = null;
+                      }),
+                      child: const Text('清除'),
+                    ),
+                  ],
+                ),
+              ),
+            Expanded(
+              child: _aiSearching
+                  ? const Center(child: CircularProgressIndicator())
+                  : _query.text.trim().isEmpty
+                  ? Center(
+                      child: Text(_naturalLanguage ? '描述你想查找的笔记' : '输入关键词搜索笔记'),
+                    )
+                  : results.isEmpty
+                  ? const Center(child: Text('未找到匹配的笔记'))
+                  : ListView.builder(
+                      padding: const EdgeInsets.all(12),
+                      itemCount: results.length,
+                      itemBuilder: (context, index) => NoteCard(
+                        note: results[index],
+                        onTap: () => Navigator.push<void>(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) =>
+                                NoteEditorScreen(noteId: results[index].id),
+                          ),
                         ),
                       ),
                     ),
-                  ),
-          ),
-        ],
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -266,117 +288,121 @@ class _TagsScreenState extends State<TagsScreen> {
       onPointerDown: (_) => ScaffoldMessenger.of(context).hideCurrentSnackBar(),
       child: Scaffold(
         appBar: AppBar(toolbarHeight: 72, title: const Text('标签管理')),
-        body: ListView(
-          padding: const EdgeInsets.fromLTRB(20, 8, 20, 40),
-          children: [
-            Text(
-              '创建新标签',
-              style: theme.textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.w700,
+        body: _desktopPageBody(
+          context,
+          ListView(
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 40),
+            children: [
+              Text(
+                '创建新标签',
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
               ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              '使用标签整理笔记，让内容更容易查找。',
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: colors.onSurfaceVariant,
+              const SizedBox(height: 6),
+              Text(
+                '使用标签整理笔记，让内容更容易查找。',
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: colors.onSurfaceVariant,
+                ),
               ),
-            ),
-            const SizedBox(height: 16),
-            Container(
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: colors.surface,
-                borderRadius: BorderRadius.circular(20),
-                boxShadow: [
-                  BoxShadow(
-                    color: colors.shadow.withValues(alpha: .06),
-                    blurRadius: 22,
-                    offset: const Offset(0, 8),
-                  ),
-                ],
-              ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _tag,
-                      maxLength: maxTagNameLength,
-                      maxLengthEnforcement: MaxLengthEnforcement.enforced,
-                      inputFormatters: [_tagLengthLimiter],
-                      textInputAction: TextInputAction.done,
-                      onChanged: (_) => setState(() {}),
-                      onSubmitted: (_) => _add(),
-                      decoration: InputDecoration(
-                        hintText: '输入标签名称',
-                        prefixIcon: const Icon(Icons.label_outline_rounded),
-                        fillColor: colors.surfaceContainerLow,
-                      ),
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: colors.surface,
+                  borderRadius: BorderRadius.circular(20),
+                  boxShadow: [
+                    BoxShadow(
+                      color: colors.shadow.withValues(alpha: .06),
+                      blurRadius: 22,
+                      offset: const Offset(0, 8),
                     ),
-                  ),
-                  const SizedBox(width: 10),
-                  SizedBox(
-                    height: 54,
-                    child: FilledButton.icon(
-                      onPressed: _tag.text.trim().isEmpty ? null : _add,
-                      icon: const Icon(Icons.add_rounded, size: 20),
-                      label: const Text('添加'),
-                      style: FilledButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(horizontal: 15),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(16),
+                  ],
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _tag,
+                        maxLength: maxTagNameLength,
+                        maxLengthEnforcement: MaxLengthEnforcement.enforced,
+                        inputFormatters: [_tagLengthLimiter],
+                        textInputAction: TextInputAction.done,
+                        onChanged: (_) => setState(() {}),
+                        onSubmitted: (_) => _add(),
+                        decoration: InputDecoration(
+                          hintText: '输入标签名称',
+                          prefixIcon: const Icon(Icons.label_outline_rounded),
+                          fillColor: colors.surfaceContainerLow,
                         ),
                       ),
                     ),
+                    const SizedBox(width: 10),
+                    SizedBox(
+                      height: 54,
+                      child: FilledButton.icon(
+                        onPressed: _tag.text.trim().isEmpty ? null : _add,
+                        icon: const Icon(Icons.add_rounded, size: 20),
+                        label: const Text('添加'),
+                        style: FilledButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(horizontal: 15),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 32),
+              Row(
+                children: [
+                  Text(
+                    '全部标签',
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const Spacer(),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 5,
+                    ),
+                    decoration: BoxDecoration(
+                      color: colors.primaryContainer,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Text(
+                      '${app.tags.length} 个',
+                      style: theme.textTheme.labelMedium?.copyWith(
+                        color: colors.onPrimaryContainer,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
                   ),
                 ],
               ),
-            ),
-            const SizedBox(height: 32),
-            Row(
-              children: [
-                Text(
-                  '全部标签',
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const Spacer(),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 5,
-                  ),
-                  decoration: BoxDecoration(
-                    color: colors.primaryContainer,
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Text(
-                    '${app.tags.length} 个',
-                    style: theme.textTheme.labelMedium?.copyWith(
-                      color: colors.onPrimaryContainer,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 14),
-            if (app.tags.isEmpty)
-              _EmptyTags(colors: colors)
-            else
-              ...app.tags.map((tag) {
-                final usage = [
-                  ...app.notes,
-                  ...app.trashedNotes,
-                ].where((note) => note.tags.contains(tag)).length;
-                return _TagManagementCard(
-                  tag: tag,
-                  usage: usage,
-                  onDelete: () => _delete(tag),
-                );
-              }),
-          ],
+              const SizedBox(height: 14),
+              if (app.tags.isEmpty)
+                _EmptyTags(colors: colors)
+              else
+                ...app.tags.map((tag) {
+                  final usage = [
+                    ...app.notes,
+                    ...app.trashedNotes,
+                  ].where((note) => note.tags.contains(tag)).length;
+                  return _TagManagementCard(
+                    tag: tag,
+                    usage: usage,
+                    onDelete: () => _delete(tag),
+                  );
+                }),
+            ],
+          ),
+          maxWidth: 760,
         ),
       ),
     );
@@ -554,22 +580,26 @@ class FavoritesScreen extends StatelessWidget {
         .toList();
     return Scaffold(
       appBar: AppBar(title: const Text('收藏夹')),
-      body: notes.isEmpty
-          ? const Center(child: Text('收藏夹暂无笔记'))
-          : ListView.builder(
-              padding: const EdgeInsets.all(12),
-              itemCount: notes.length,
-              itemBuilder: (context, index) => NoteCard(
-                note: notes[index],
-                onTap: () => Navigator.push<void>(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => NoteEditorScreen(noteId: notes[index].id),
+      body: _desktopPageBody(
+        context,
+        notes.isEmpty
+            ? const Center(child: Text('收藏夹暂无笔记'))
+            : ListView.builder(
+                padding: const EdgeInsets.all(12),
+                itemCount: notes.length,
+                itemBuilder: (context, index) => NoteCard(
+                  note: notes[index],
+                  onTap: () => Navigator.push<void>(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => NoteEditorScreen(noteId: notes[index].id),
+                    ),
                   ),
+                  onLongPress: () => _remove(context, notes[index]),
                 ),
-                onLongPress: () => _remove(context, notes[index]),
               ),
-            ),
+        maxWidth: 900,
+      ),
     );
   }
 
@@ -632,51 +662,61 @@ class _TrashScreenState extends State<TrashScreen> {
               ]
             : null,
       ),
-      body: notes.isEmpty
-          ? const Center(child: Text('回收站暂无笔记'))
-          : ListView.builder(
-              padding: const EdgeInsets.all(12),
-              itemCount: notes.length,
-              itemBuilder: (context, index) {
-                final note = notes[index];
-                return NoteCard(
-                  note: note,
-                  selected: _selected.contains(note.id),
-                  onLongPress: () => setState(() => _selected.add(note.id)),
-                  onTap: () {
-                    if (selecting) {
-                      setState(
-                        () => _selected.contains(note.id)
-                            ? _selected.remove(note.id)
-                            : _selected.add(note.id),
-                      );
-                    } else {
-                      Navigator.push<void>(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => NoteEditorScreen(
-                            noteId: note.id,
-                            readOnly: true,
-                            deleted: true,
+      body: _desktopPageBody(
+        context,
+        notes.isEmpty
+            ? const Center(child: Text('回收站暂无笔记'))
+            : ListView.builder(
+                padding: const EdgeInsets.all(12),
+                itemCount: notes.length,
+                itemBuilder: (context, index) {
+                  final note = notes[index];
+                  return NoteCard(
+                    note: note,
+                    selected: _selected.contains(note.id),
+                    onLongPress: () => setState(() => _selected.add(note.id)),
+                    onTap: () {
+                      if (selecting) {
+                        setState(
+                          () => _selected.contains(note.id)
+                              ? _selected.remove(note.id)
+                              : _selected.add(note.id),
+                        );
+                      } else {
+                        Navigator.push<void>(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => NoteEditorScreen(
+                              noteId: note.id,
+                              readOnly: true,
+                              deleted: true,
+                            ),
                           ),
-                        ),
-                      );
-                    }
-                  },
-                  trailing: selecting
-                      ? null
-                      : PopupMenuButton<String>(
-                          onSelected: (value) => value == 'restore'
-                              ? _restore([note.id])
-                              : _delete([note.id]),
-                          itemBuilder: (_) => const [
-                            PopupMenuItem(value: 'restore', child: Text('恢复')),
-                            PopupMenuItem(value: 'delete', child: Text('永久删除')),
-                          ],
-                        ),
-                );
-              },
-            ),
+                        );
+                      }
+                    },
+                    trailing: selecting
+                        ? null
+                        : PopupMenuButton<String>(
+                            onSelected: (value) => value == 'restore'
+                                ? _restore([note.id])
+                                : _delete([note.id]),
+                            itemBuilder: (_) => const [
+                              PopupMenuItem(
+                                value: 'restore',
+                                child: Text('恢复'),
+                              ),
+                              PopupMenuItem(
+                                value: 'delete',
+                                child: Text('永久删除'),
+                              ),
+                            ],
+                          ),
+                  );
+                },
+              ),
+        maxWidth: 900,
+      ),
       bottomNavigationBar: selecting
           ? SafeArea(
               child: Padding(
@@ -1029,122 +1069,126 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(title: const Text('设置')),
-    body: ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
-        const Card(
-          child: ListTile(
-            leading: Icon(Icons.info_outline),
-            title: Text('关于 Moment'),
-            subtitle: Text('Flutter 笔记版 · 支持 Markdown 预览'),
-          ),
-        ),
-        const SizedBox(height: 12),
-        if (AppScope.of(context).achievements.isNotEmpty) ...[
-          Card(
+    body: _desktopPageBody(
+      context,
+      ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          const Card(
             child: ListTile(
-              leading: const Icon(Icons.emoji_events_outlined),
-              title: const Text('成就'),
-              subtitle: Text(
-                '已获得 ${AppScope.of(context).achievements.length} 项成就',
-              ),
-              trailing: const Icon(Icons.chevron_right_rounded),
-              onTap: () => Navigator.push<void>(
-                context,
-                MaterialPageRoute(builder: (_) => const AchievementsScreen()),
-              ),
+              leading: Icon(Icons.info_outline),
+              title: Text('关于 Moment'),
+              subtitle: Text('Flutter 笔记版 · 支持 Markdown 预览'),
             ),
           ),
           const SizedBox(height: 12),
-        ],
-        Card(
-          child: ListTile(
-            leading: const Icon(Icons.edit_calendar_outlined),
-            title: const Text('修改笔记创建时间'),
-            subtitle: const Text('临时测试工具 · 不会改变最新修改时间'),
-            trailing: _updatingCreatedAt
-                ? const SizedBox.square(
-                    dimension: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.chevron_right_rounded),
-            onTap: _updatingCreatedAt ? null : _changeNoteCreatedAt,
+          if (AppScope.of(context).achievements.isNotEmpty) ...[
+            Card(
+              child: ListTile(
+                leading: const Icon(Icons.emoji_events_outlined),
+                title: const Text('成就'),
+                subtitle: Text(
+                  '已获得 ${AppScope.of(context).achievements.length} 项成就',
+                ),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () => Navigator.push<void>(
+                  context,
+                  MaterialPageRoute(builder: (_) => const AchievementsScreen()),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
+          Card(
+            child: ListTile(
+              leading: const Icon(Icons.edit_calendar_outlined),
+              title: const Text('修改笔记创建时间'),
+              subtitle: const Text('临时测试工具 · 不会改变最新修改时间'),
+              trailing: _updatingCreatedAt
+                  ? const SizedBox.square(
+                      dimension: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.chevron_right_rounded),
+              onTap: _updatingCreatedAt ? null : _changeNoteCreatedAt,
+            ),
           ),
-        ),
-        const SizedBox(height: 12),
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('AI 配置', style: Theme.of(context).textTheme.titleMedium),
-                const SizedBox(height: 8),
-                const Text(
-                  '支持 OpenAI 兼容的 Chat Completions 接口。API Key 将加密保存在本机；三项全部填写后，AI 标签和自然语言搜索才会显示。',
-                ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: _baseUrl,
-                  keyboardType: TextInputType.url,
-                  decoration: const InputDecoration(
-                    labelText: 'Base URL',
-                    hintText: 'https://api.example.com/v1',
+          const SizedBox(height: 12),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('AI 配置', style: Theme.of(context).textTheme.titleMedium),
+                  const SizedBox(height: 8),
+                  const Text(
+                    '支持 OpenAI 兼容的 Chat Completions 接口。API Key 将加密保存在本机；三项全部填写后，AI 标签和自然语言搜索才会显示。',
                   ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: _model,
-                  decoration: const InputDecoration(labelText: '模型名称'),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: _apiKey,
-                  obscureText: !_showKey,
-                  decoration: InputDecoration(
-                    labelText: 'API Key',
-                    suffixIcon: IconButton(
-                      onPressed: () => setState(() => _showKey = !_showKey),
-                      icon: Icon(
-                        _showKey
-                            ? Icons.visibility_off_outlined
-                            : Icons.visibility_outlined,
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: _baseUrl,
+                    keyboardType: TextInputType.url,
+                    decoration: const InputDecoration(
+                      labelText: 'Base URL',
+                      hintText: 'https://api.example.com/v1',
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: _model,
+                    decoration: const InputDecoration(labelText: '模型名称'),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: _apiKey,
+                    obscureText: !_showKey,
+                    decoration: InputDecoration(
+                      labelText: 'API Key',
+                      suffixIcon: IconButton(
+                        onPressed: () => setState(() => _showKey = !_showKey),
+                        icon: Icon(
+                          _showKey
+                              ? Icons.visibility_off_outlined
+                              : Icons.visibility_outlined,
+                        ),
                       ),
                     ),
                   ),
-                ),
-                const SizedBox(height: 16),
-                SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton.icon(
-                    onPressed: _saving || _testing ? null : _testSingleTurn,
-                    icon: _testing
-                        ? const SizedBox.square(
-                            dimension: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.chat_outlined),
-                    label: Text(_testing ? '正在调用' : '测试单轮对话'),
+                  const SizedBox(height: 16),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: _saving || _testing ? null : _testSingleTurn,
+                      icon: _testing
+                          ? const SizedBox.square(
+                              dimension: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.chat_outlined),
+                      label: Text(_testing ? '正在调用' : '测试单轮对话'),
+                    ),
                   ),
-                ),
-                const SizedBox(height: 10),
-                SizedBox(
-                  width: double.infinity,
-                  child: FilledButton(
-                    onPressed: _saving || _testing ? null : _save,
-                    child: _saving
-                        ? const SizedBox.square(
-                            dimension: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Text('保存 AI 配置'),
+                  const SizedBox(height: 10),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton(
+                      onPressed: _saving || _testing ? null : _save,
+                      child: _saving
+                          ? const SizedBox.square(
+                              dimension: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Text('保存 AI 配置'),
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
-        ),
-      ],
+        ],
+      ),
+      maxWidth: 760,
     ),
   );
 }
@@ -1159,73 +1203,77 @@ class AchievementsScreen extends StatelessWidget {
     final colors = theme.colorScheme;
     return Scaffold(
       appBar: AppBar(title: const Text('成就')),
-      body: CustomScrollView(
-        slivers: [
-          SliverToBoxAdapter(
-            child: Container(
-              padding: const EdgeInsets.fromLTRB(24, 18, 24, 32),
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [
-                    colors.primaryContainer.withValues(alpha: .65),
-                    colors.surface.withValues(alpha: 0),
+      body: _desktopPageBody(
+        context,
+        CustomScrollView(
+          slivers: [
+            SliverToBoxAdapter(
+              child: Container(
+                padding: const EdgeInsets.fromLTRB(24, 18, 24, 32),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      colors.primaryContainer.withValues(alpha: .65),
+                      colors.surface.withValues(alpha: 0),
+                    ],
+                  ),
+                ),
+                child: Column(
+                  children: [
+                    Container(
+                      width: 78,
+                      height: 78,
+                      decoration: BoxDecoration(
+                        color: colors.primary,
+                        shape: BoxShape.circle,
+                        boxShadow: [
+                          BoxShadow(
+                            color: colors.primary.withValues(alpha: .24),
+                            blurRadius: 24,
+                            offset: const Offset(0, 10),
+                          ),
+                        ],
+                      ),
+                      child: Icon(
+                        Icons.emoji_events_rounded,
+                        color: colors.onPrimary,
+                        size: 40,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      '已获得 ${achievements.length} 项成就',
+                      style: theme.textTheme.headlineSmall?.copyWith(
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      '每一次记录与完成，都在构成你的时间轨迹',
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: colors.onSurfaceVariant,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
                   ],
                 ),
               ),
-              child: Column(
-                children: [
-                  Container(
-                    width: 78,
-                    height: 78,
-                    decoration: BoxDecoration(
-                      color: colors.primary,
-                      shape: BoxShape.circle,
-                      boxShadow: [
-                        BoxShadow(
-                          color: colors.primary.withValues(alpha: .24),
-                          blurRadius: 24,
-                          offset: const Offset(0, 10),
-                        ),
-                      ],
-                    ),
-                    child: Icon(
-                      Icons.emoji_events_rounded,
-                      color: colors.onPrimary,
-                      size: 40,
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    '已获得 ${achievements.length} 项成就',
-                    style: theme.textTheme.headlineSmall?.copyWith(
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    '每一次记录与完成，都在构成你的时间轨迹',
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: colors.onSurfaceVariant,
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-                ],
+            ),
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(20, 4, 20, 36),
+              sliver: SliverList.builder(
+                itemCount: achievements.length,
+                itemBuilder: (context, index) => _AchievementTimelineItem(
+                  achievement: achievements[index],
+                  isLast: index == achievements.length - 1,
+                ),
               ),
             ),
-          ),
-          SliverPadding(
-            padding: const EdgeInsets.fromLTRB(20, 4, 20, 36),
-            sliver: SliverList.builder(
-              itemCount: achievements.length,
-              itemBuilder: (context, index) => _AchievementTimelineItem(
-                achievement: achievements[index],
-                isLast: index == achievements.length - 1,
-              ),
-            ),
-          ),
-        ],
+          ],
+        ),
+        maxWidth: 760,
       ),
     );
   }

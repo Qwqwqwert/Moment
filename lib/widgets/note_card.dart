@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../models/note.dart';
+import '../theme/desktop_environment.dart';
 
 class NoteCard extends StatelessWidget {
   const NoteCard({
@@ -8,20 +9,25 @@ class NoteCard extends StatelessWidget {
     required this.note,
     required this.onTap,
     this.selected = false,
+    this.active = false,
     this.onLongPress,
     this.trailing,
+    this.compact = false,
   });
 
   final Note note;
   final VoidCallback onTap;
   final VoidCallback? onLongPress;
   final bool selected;
+  final bool active;
   final Widget? trailing;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colors = theme.colorScheme;
+    final isCompact = compact || DesktopEnvironment.isDesktopOf(context);
     final hasTitle = note.title.trim().isNotEmpty;
     final contentLines = note.content.trim().isNotEmpty
         ? note.content
@@ -41,17 +47,19 @@ class NoteCard extends StatelessWidget {
 
     return AnimatedContainer(
       duration: const Duration(milliseconds: 180),
-      margin: const EdgeInsets.only(bottom: 10),
+      margin: EdgeInsets.only(bottom: isCompact ? 4 : 10),
       decoration: BoxDecoration(
         color: selected
             ? colors.primaryContainer.withValues(alpha: 0.68)
+            : active
+            ? colors.primaryContainer.withValues(alpha: 0.42)
             : colors.surface,
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(isCompact ? 7 : 20),
         border: Border.all(
           color: selected ? colors.primary : Colors.transparent,
           width: 1.5,
         ),
-        boxShadow: selected
+        boxShadow: selected || isCompact
             ? null
             : const [
                 BoxShadow(
@@ -61,149 +69,171 @@ class NoteCard extends StatelessWidget {
                 ),
               ],
       ),
-      child: Material(
-        color: Colors.transparent,
-        clipBehavior: Clip.antiAlias,
-        borderRadius: BorderRadius.circular(20),
-        child: InkWell(
-          onTap: onTap,
-          onLongPress: onLongPress,
-          child: Padding(
-            padding: EdgeInsets.fromLTRB(
-              16,
-              hasSecondaryText ? 12 : 10,
-              14,
-              hasSecondaryText ? 11 : 9,
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.center,
+      child: Stack(
+        children: [
+          Material(
+            color: Colors.transparent,
+            clipBehavior: Clip.antiAlias,
+            borderRadius: BorderRadius.circular(isCompact ? 7 : 20),
+            child: InkWell(
+              onTap: onTap,
+              onLongPress: onLongPress,
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(
+                  isCompact ? 12 : 16,
+                  isCompact ? 9 : (hasSecondaryText ? 12 : 10),
+                  isCompact ? 10 : 14,
+                  isCompact ? 8 : (hasSecondaryText ? 11 : 9),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Expanded(
-                      child: Text(
-                        primaryText,
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        Expanded(
+                          child: Text(
+                            primaryText,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.titleMedium?.copyWith(
+                              fontSize: isCompact ? 15 : 17,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: -0.2,
+                            ),
+                          ),
+                        ),
+                        if (note.isFavorite)
+                          Padding(
+                            padding: const EdgeInsets.only(left: 8),
+                            child: Icon(
+                              Icons.star_rounded,
+                              size: 20,
+                              color: colors.tertiary,
+                            ),
+                          ),
+                        ?trailing,
+                      ],
+                    ),
+                    if (hasSecondaryText) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        secondaryText,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.titleMedium?.copyWith(
-                          fontSize: 17,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: -0.2,
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          height: 1.3,
+                          color: colors.onSurfaceVariant,
                         ),
                       ),
-                    ),
-                    if (note.isFavorite)
-                      Padding(
-                        padding: const EdgeInsets.only(left: 8),
-                        child: Icon(
-                          Icons.star_rounded,
-                          size: 20,
-                          color: colors.tertiary,
-                        ),
-                      ),
-                    ?trailing,
-                  ],
-                ),
-                if (hasSecondaryText) ...[
-                  const SizedBox(height: 4),
-                  Text(
-                    secondaryText,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      height: 1.3,
-                      color: colors.onSurfaceVariant,
-                    ),
-                  ),
-                ],
-                SizedBox(height: hasSecondaryText ? 10 : 7),
-                Row(
-                  children: [
-                    Expanded(
-                      child: Wrap(
-                        spacing: 5,
-                        runSpacing: 4,
-                        children: note.tags.take(3).map((tag) {
-                          return Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 3,
-                            ),
-                            decoration: BoxDecoration(
-                              color: colors.primaryContainer.withValues(
-                                alpha: 0.55,
-                              ),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Text(
-                              tag,
-                              style: theme.textTheme.labelSmall?.copyWith(
-                                color: colors.primary,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          );
-                        }).toList(),
-                      ),
-                    ),
-                    if (note.imagePaths.isNotEmpty) ...[
-                      Icon(
-                        Icons.image_outlined,
-                        size: 15,
-                        color: colors.outline,
-                      ),
-                      const SizedBox(width: 3),
-                      Text(
-                        '${note.imagePaths.length}',
-                        style: theme.textTheme.labelSmall?.copyWith(
-                          color: colors.outline,
-                        ),
-                      ),
-                      const SizedBox(width: 10),
                     ],
-                    if (note.videoPaths.isNotEmpty) ...[
-                      Icon(
-                        Icons.videocam_outlined,
-                        size: 16,
-                        color: colors.outline,
-                      ),
-                      const SizedBox(width: 3),
-                      Text(
-                        '${note.videoPaths.length}',
-                        style: theme.textTheme.labelSmall?.copyWith(
-                          color: colors.outline,
+                    SizedBox(
+                      height: isCompact ? 6 : (hasSecondaryText ? 10 : 7),
+                    ),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Wrap(
+                            spacing: 5,
+                            runSpacing: 4,
+                            children: note.tags.take(3).map((tag) {
+                              return Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 3,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: colors.primaryContainer.withValues(
+                                    alpha: 0.55,
+                                  ),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Text(
+                                  tag,
+                                  style: theme.textTheme.labelSmall?.copyWith(
+                                    color: colors.primary,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              );
+                            }).toList(),
+                          ),
                         ),
-                      ),
-                      const SizedBox(width: 10),
-                    ],
-                    if (note.audioPaths.isNotEmpty) ...[
-                      Icon(
-                        Icons.mic_none_rounded,
-                        size: 16,
-                        color: colors.outline,
-                      ),
-                      const SizedBox(width: 3),
-                      Text(
-                        '${note.audioPaths.length}',
-                        style: theme.textTheme.labelSmall?.copyWith(
-                          color: colors.outline,
+                        if (note.imagePaths.isNotEmpty) ...[
+                          Icon(
+                            Icons.image_outlined,
+                            size: 15,
+                            color: colors.outline,
+                          ),
+                          const SizedBox(width: 3),
+                          Text(
+                            '${note.imagePaths.length}',
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: colors.outline,
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                        ],
+                        if (note.videoPaths.isNotEmpty) ...[
+                          Icon(
+                            Icons.videocam_outlined,
+                            size: 16,
+                            color: colors.outline,
+                          ),
+                          const SizedBox(width: 3),
+                          Text(
+                            '${note.videoPaths.length}',
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: colors.outline,
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                        ],
+                        if (note.audioPaths.isNotEmpty) ...[
+                          Icon(
+                            Icons.mic_none_rounded,
+                            size: 16,
+                            color: colors.outline,
+                          ),
+                          const SizedBox(width: 3),
+                          Text(
+                            '${note.audioPaths.length}',
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: colors.outline,
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                        ],
+                        Text(
+                          _formatDate(note.updatedAt),
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: colors.outline,
+                          ),
                         ),
-                      ),
-                      const SizedBox(width: 10),
-                    ],
-                    Text(
-                      _formatDate(note.updatedAt),
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        color: colors.outline,
-                      ),
+                      ],
                     ),
                   ],
                 ),
-              ],
+              ),
             ),
           ),
-        ),
+          if (active && !selected)
+            Positioned(
+              key: ValueKey('active-note-${note.id}'),
+              left: 0,
+              top: 8,
+              bottom: 8,
+              child: IgnorePointer(
+                child: Container(
+                  width: 3,
+                  decoration: BoxDecoration(
+                    color: colors.primary,
+                    borderRadius: BorderRadius.circular(3),
+                  ),
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }

@@ -13,3 +13,10 @@ abstract interface class TodoRepository {
   Future<void> restoreTodos(Iterable<String> ids);
   Future<void> permanentlyDeleteTodos(Iterable<String> ids);
 }
+
+/// Persistent de-duplication for runtime Windows reminders.
+abstract interface class WindowsReminderDeliveryRepository {
+  Future<bool> wasWindowsReminderDelivered(String todoId, DateTime dueAt);
+  Future<void> markWindowsReminderDelivered(String todoId, DateTime dueAt);
+  Future<void> pruneWindowsReminderDeliveries(DateTime before);
+}

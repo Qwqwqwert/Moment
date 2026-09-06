@@ -11,8 +11,9 @@ import '../models/note.dart';
 import '../models/todo.dart';
 import '../services/ai_service.dart';
 import '../services/todo_reminder_service.dart';
+import '../services/pending_work_coordinator.dart';
 
-class AppController extends ChangeNotifier {
+class AppController extends ChangeNotifier with WidgetsBindingObserver {
   AppController({
     required this.repository,
     required this.attachmentStore,
@@ -24,7 +25,11 @@ class AppController extends ChangeNotifier {
   final AttachmentStore attachmentStore;
   final TodoReminderService? todoReminderService;
   final AiSettingsStore aiSettingsStore;
+  final pendingWork = PendingWorkCoordinator();
   StreamSubscription<void>? _subscription;
+  Future<void>? _initializationOperation;
+  bool _closed = false;
+  int _activeReloads = 0;
 
   bool initialized = false;
   Object? initializationError;
@@ -38,9 +43,13 @@ class AppController extends ChangeNotifier {
   AiConfig aiConfig = const AiConfig();
   final List<Achievement> _pendingAchievements = [];
 
-  Future<void> initialize() async {
+  Future<void> initialize() => _initializationOperation ??= _initialize();
+
+  Future<void> _initialize() async {
     try {
       await repository.initialize();
+      todoReminderService?.bindRepository(repository);
+      WidgetsBinding.instance.addObserver(this);
       aiConfig = await aiSettingsStore.load();
       _subscription = repository.changes.listen((_) => reload());
       initialized = true;
@@ -51,21 +60,35 @@ class AppController extends ChangeNotifier {
     }
   }
 
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      final reminderService = todoReminderService;
+      if (reminderService != null) unawaited(reminderService.resume(todos));
+    }
+  }
+
   Future<void> reload() async {
-    loading = true;
-    notifyListeners();
-    notes = await repository.getNotes();
-    trashedNotes = await repository.getNotes(deleted: true);
-    final todoRepository = repository is TodoRepository
-        ? repository as TodoRepository
-        : null;
-    todos = await todoRepository?.getTodos() ?? const [];
-    trashedTodos = await todoRepository?.getTodos(deleted: true) ?? const [];
-    await todoReminderService?.syncReminders(todos);
-    tags = await repository.getTags();
-    achievements = await _achievementRepository?.getAchievements() ?? const [];
-    loading = false;
-    notifyListeners();
+    _activeReloads++;
+    try {
+      loading = true;
+      notifyListeners();
+      notes = await repository.getNotes();
+      trashedNotes = await repository.getNotes(deleted: true);
+      final todoRepository = repository is TodoRepository
+          ? repository as TodoRepository
+          : null;
+      todos = await todoRepository?.getTodos() ?? const [];
+      trashedTodos = await todoRepository?.getTodos(deleted: true) ?? const [];
+      await todoReminderService?.syncReminders(todos);
+      tags = await repository.getTags();
+      achievements =
+          await _achievementRepository?.getAchievements() ?? const [];
+      loading = false;
+      notifyListeners();
+    } finally {
+      _activeReloads--;
+    }
   }
 
   Note? findNote(String id, {bool deleted = false}) {
@@ -105,7 +128,8 @@ class AppController extends ChangeNotifier {
       await todoReminderService?.showTestReminder() ?? false;
 
   Future<void> saveTodo(Todo todo) async {
-    await _todos?.saveTodo(todo);
+    final operation = _todos?.saveTodo(todo);
+    if (operation != null) await pendingWork.track(operation);
     if (!todo.reminderEnabled) await todoReminderService?.cancel(todo.id);
   }
 
@@ -115,7 +139,12 @@ class AppController extends ChangeNotifier {
     DateTime? nextDueAt,
   }) async {
     final source = findTodo(id) ?? findTodo(id, deleted: true);
-    await _todos?.setTodoCompleted(id, completed, nextDueAt: nextDueAt);
+    final operation = _todos?.setTodoCompleted(
+      id,
+      completed,
+      nextDueAt: nextDueAt,
+    );
+    if (operation != null) await pendingWork.track(operation);
     if (completed) {
       await todoReminderService?.cancel(id);
       if (source != null && !source.isCompleted) {
@@ -128,18 +157,22 @@ class AppController extends ChangeNotifier {
 
   Future<void> trashTodos(Iterable<String> ids) async {
     final values = ids.toList();
-    await _todos?.moveTodosToTrash(values);
+    final operation = _todos?.moveTodosToTrash(values);
+    if (operation != null) await pendingWork.track(operation);
     for (final id in values) {
       await todoReminderService?.cancel(id);
     }
   }
 
-  Future<void> restoreTodos(Iterable<String> ids) async =>
-      _todos?.restoreTodos(ids);
+  Future<void> restoreTodos(Iterable<String> ids) async {
+    final operation = _todos?.restoreTodos(ids);
+    if (operation != null) await pendingWork.track(operation);
+  }
 
   Future<void> deleteTodosForever(Iterable<String> ids) async {
     final values = ids.toList();
-    await _todos?.permanentlyDeleteTodos(values);
+    final operation = _todos?.permanentlyDeleteTodos(values);
+    if (operation != null) await pendingWork.track(operation);
     for (final id in values) {
       await todoReminderService?.cancel(id);
     }
@@ -149,7 +182,7 @@ class AppController extends ChangeNotifier {
     final shouldCountAsNew =
         isNew ??
         (findNote(note.id) == null && findNote(note.id, deleted: true) == null);
-    await repository.saveNote(note);
+    await pendingWork.track(repository.saveNote(note));
     if (shouldCountAsNew) {
       await _registerAchievement(
         _achievementRepository?.recordNoteCreated(note.id),
@@ -157,18 +190,21 @@ class AppController extends ChangeNotifier {
     }
   }
 
-  Future<void> trash(Iterable<String> ids) => repository.moveToTrash(ids);
-  Future<void> restore(Iterable<String> ids) => repository.restore(ids);
+  Future<void> trash(Iterable<String> ids) =>
+      pendingWork.track(repository.moveToTrash(ids));
+  Future<void> restore(Iterable<String> ids) =>
+      pendingWork.track(repository.restore(ids));
 
   Future<void> deleteForever(Iterable<String> ids) async {
-    final paths = await repository.permanentlyDelete(ids);
-    await attachmentStore.deleteFiles(paths);
+    final paths = await pendingWork.track(repository.permanentlyDelete(ids));
+    await pendingWork.track(attachmentStore.deleteFiles(paths));
   }
 
   Future<void> favorite(String id, bool value) =>
-      repository.setFavorite(id, value);
-  Future<void> addTag(String tag) => repository.addTag(tag);
-  Future<void> deleteTag(String tag) => repository.deleteTag(tag);
+      pendingWork.track(repository.setFavorite(id, value));
+  Future<void> addTag(String tag) => pendingWork.track(repository.addTag(tag));
+  Future<void> deleteTag(String tag) =>
+      pendingWork.track(repository.deleteTag(tag));
 
   Future<void> saveAiConfig(AiConfig config) async {
     final normalized = AiConfig(
@@ -176,7 +212,7 @@ class AppController extends ChangeNotifier {
       model: config.model.trim(),
       apiKey: config.apiKey.trim(),
     );
-    await aiSettingsStore.save(normalized);
+    await pendingWork.track(aiSettingsStore.save(normalized));
     aiConfig = normalized;
     notifyListeners();
   }
@@ -199,8 +235,22 @@ class AppController extends ChangeNotifier {
   @override
   void dispose() {
     _subscription?.cancel();
-    repository.close();
+    WidgetsBinding.instance.removeObserver(this);
+    unawaited(shutdown());
     super.dispose();
+  }
+
+  Future<void> shutdown() async {
+    if (_closed) return;
+    _closed = true;
+    await _initializationOperation;
+    await _subscription?.cancel();
+    while (_activeReloads > 0) {
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+    }
+    await pendingWork.flush();
+    await todoReminderService?.dispose();
+    await repository.close();
   }
 }
 
