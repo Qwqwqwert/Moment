@@ -28,6 +28,8 @@ cp "$project_root/linux/packaging/io.github.qwqwqwert.moment.desktop" \
   "$appdir/usr/share/applications/io.github.qwqwqwert.moment.desktop"
 cp "$project_root/linux/packaging/io.github.qwqwqwert.moment.appdata.xml" \
   "$appdir/usr/share/metainfo/io.github.qwqwqwert.moment.appdata.xml"
+# linuxdeploy requires the icon dimensions to match the hicolor directory.
+# Keep moment_icon.png as a standard 512x512 PNG (not the original source image size).
 cp "$project_root/windows/runner/resources/moment_icon.png" \
   "$appdir/usr/share/icons/hicolor/512x512/apps/io.github.qwqwqwert.moment.png"
 
